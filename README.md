@@ -48,8 +48,25 @@ Make the directory readable
     chmod -R 755 /var/www/upload/
 ```
 
+## Install Docker
+Use the following link to install docker
+```shell
+https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-20-04
+```
 
+Create Postgres Database
+```shell
+    docker run --name myPostgresDb -p 5455:5432 -e POSTGRES_USER=postgresUser -e POSTGRES_PASSWORD=postgresPW -e POSTGRES_DB=postgresDB -d postgres
+```
 
+In case of this error
+```shell
+    docker: Error response from daemon: Conflict. The container name "/myPostgresDb" is already in use by container "937c5c6847275dfc5253cd646acbe97611c87621a42a71bb2e54a5f08ad90742". You have to remove (or rename) that container to be able to reuse that name.
+```
+Prune the docker container
+```shell
+    docker container prune
+```
 
 ## Copyright
 
