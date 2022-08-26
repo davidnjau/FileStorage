@@ -33,7 +33,7 @@ public class FilesController {
                     content = { @Content(examples = { @ExampleObject(value = "") }) }),
             @ApiResponse(responseCode = "404", description = "${api.response-codes.notFound.desc}",
                     content = { @Content(examples = { @ExampleObject(value = "") }) }) })
-    @PostMapping("/uploadFile")
+    @PostMapping("/upload-file")
     public FileUploadResponse uploadFile(@RequestParam("file") MultipartFile file) {
         Files files = fileStorageService.storeFile(file);
 
