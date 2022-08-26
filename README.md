@@ -27,6 +27,26 @@ You can access the swagger UI platform from:
 http://{{host_url}}:8081/swagger-ui.html
 ```
 
+Make sure to add the open-ui swagger
+```shell
+    <dependency>
+        <groupId>org.springdoc</groupId>
+        <artifactId>springdoc-openapi-ui</artifactId>
+        <version>1.6.11</version>
+    </dependency>
+ ```
+Create the /var/www/upload/ directory 
+```shell
+    mkdir /var/www/upload/
+```
+Make the directory writable
+```shell
+    chmod -R 777 /var/www/upload/
+```
+Make the directory readable
+```shell
+    chmod -R 755 /var/www/upload/
+```
 
 
 
