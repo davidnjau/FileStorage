@@ -11,6 +11,7 @@ import java.util.Map;
 public class FileDocument {
 
     @Id
+    @Indexed
     private String id;
 
     private String originalFilename;
@@ -24,6 +25,7 @@ public class FileDocument {
     private Date lastModified;
     private String presignedUrl;
     private Date uploadedAt;
+    private Date expiryDateTime;
 
     private boolean archived = false; // Optional: Add a flag for archiving
 
@@ -31,6 +33,8 @@ public class FileDocument {
     private String uploadedBy;
     private Map<String, String> customMetadata;
     private String fileUrl;
+    private boolean isPublic;
+    private Integer expiryHourTime; // Optional: Add an expiry time for the presigned URL
 
     // Getters, Setters, Constructors
 
@@ -183,5 +187,29 @@ public class FileDocument {
 
     public void setFileUrl(String fileUrl) {
         this.fileUrl = fileUrl;
+    }
+
+    public boolean isPublic() {
+        return isPublic;
+    }
+
+    public void setPublic(boolean aPublic) {
+        isPublic = aPublic;
+    }
+
+    public Date getExpiryDateTime() {
+        return expiryDateTime;
+    }
+
+    public void setExpiryDateTime(Date expiryDateTime) {
+        this.expiryDateTime = expiryDateTime;
+    }
+
+    public Integer getExpiryHourTime() {
+        return expiryHourTime;
+    }
+
+    public void setExpiryHourTime(Integer expiryHourTime) {
+        this.expiryHourTime = expiryHourTime;
     }
 }

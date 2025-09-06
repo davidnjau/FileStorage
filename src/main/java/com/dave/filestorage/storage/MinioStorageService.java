@@ -23,4 +23,6 @@ public interface MinioStorageService {
      * @throws Exception if an error occurs during the download process
      */
     InputStream downloadFileEtag(String etag) throws Exception;
+
+    FileDocumentDto getFileDocumentInformation(String id);
 }

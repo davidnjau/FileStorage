@@ -3,6 +3,7 @@ package com.dave.filestorage.db;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -22,4 +23,8 @@ public interface FileDocumentRepository extends MongoRepository<FileDocument, St
      * @return an Optional containing the FileDocument if found, or an empty Optional if not found.
      */
     Optional<FileDocument> findFileDocumentByEtag(String etag);
+
+    Optional<FileDocument> findFirstByIdOrEtagAndIsPublicFalseAndArchivedFalse(String id, String etag);
+
+
 }

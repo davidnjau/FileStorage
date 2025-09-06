@@ -4,7 +4,8 @@ import java.util.Date;
 
 public class FileDocumentDto {
 
-    private String fileId; //This will be the eTag from AWS S3 or minIO S3 bucket
+    private String fileId; //This is the unique identifier for the file document from mongoDB
+    private String eTagId; //This is the ETag of the file in MinIO
     private String fileName;
     private Date uploadedAt;
     private long size;
@@ -13,8 +14,9 @@ public class FileDocumentDto {
     public FileDocumentDto() {
     }
 
-    public FileDocumentDto(String fileId, String fileName, Date uploadedAt, long size, String url) {
+    public FileDocumentDto(String fileId, String eTagId, String fileName, Date uploadedAt, long size, String url) {
         this.fileId = fileId;
+        this.eTagId = eTagId;
         this.fileName = fileName;
         this.uploadedAt = uploadedAt;
         this.size = size;
@@ -27,6 +29,14 @@ public class FileDocumentDto {
 
     public void setFileId(String fileId) {
         this.fileId = fileId;
+    }
+
+    public String geteTagId() {
+        return eTagId;
+    }
+
+    public void seteTagId(String eTagId) {
+        this.eTagId = eTagId;
     }
 
     public String getFileName() {

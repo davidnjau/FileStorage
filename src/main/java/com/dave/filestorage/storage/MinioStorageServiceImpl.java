@@ -1,19 +1,23 @@
 package com.dave.filestorage.storage;
 
 import com.dave.filestorage.db.FileDocument;
+import com.dave.filestorage.db.FileDocumentRepository;
 import com.dave.filestorage.db.FileDocumentService;
 import com.dave.filestorage.dto.FileDocumentDto;
 import com.dave.filestorage.minio.MinioBucketService;
 import io.minio.*;
+import io.minio.errors.*;
 import io.minio.http.Method;
-import org.checkerframework.checker.units.qual.A;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.PostConstruct;
+import java.io.IOException;
 import java.io.InputStream;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
 import java.time.ZonedDateTime;
 import java.time.format.TextStyle;
 import java.util.*;
@@ -37,6 +41,12 @@ public class MinioStorageServiceImpl implements MinioStorageService{
 
     @Value("${minio.url}")
     private String minioUrl;
+
+    @Value("${minio.expiry.hours}")
+    private String expiryHours;
+
+    @Autowired
+    private FileDocumentRepository fileDocumentRepository;
 
 
     /**
@@ -108,25 +118,12 @@ public class MinioStorageServiceImpl implements MinioStorageService{
                             .build()
             );
 
-            // Return DTO with correct URL depending on visibility
-            String url;
-            if (isPublic) {
-                url = buildPublicUrl(minioUrl, bucketName, objectName);
-            } else {
-                url = minioClient.getPresignedObjectUrl(
-                        GetPresignedObjectUrlArgs.builder()
-                                .bucket(bucketName)
-                                .object(objectName)
-                                .method(Method.GET)
-                                .expiry(1, TimeUnit.HOURS)
-                                .build()
-                );
-            }
-
-            Map<String, String> metadata = stat.userMetadata();
-
             // Persist metadata asynchronously
             FileDocument doc = new FileDocument();
+
+            String url = getMinioFileUrl(isPublic, bucketName, objectName, now, doc);
+
+            doc.setUploadedAt(Date.from(now.toInstant()));
             doc.setOriginalFilename(file.getOriginalFilename());
             doc.setObjectName(objectName);
             doc.setBucket(bucketName);
@@ -134,15 +131,15 @@ public class MinioStorageServiceImpl implements MinioStorageService{
             doc.setContentType(stat.contentType());
             doc.setEtag(stat.etag());
             doc.setLastModified(Date.from(stat.lastModified().toInstant()));
-            doc.setUploadedAt(Date.from(now.toInstant()));
             doc.setUploadedBy(null); // TODO: wire user context
             doc.setFileUrl(url);
-            doc.setCustomMetadata(metadata);
+            doc.setCustomMetadata(stat.userMetadata());
             doc.setArchived(false);
+            doc.setPublic(isPublic);
             fileMetadataWorker.persistMetadataAsync(doc);
 
-
             return new FileDocumentDto(
+                    doc.getEtag(),
                     doc.getEtag(),
                     doc.getOriginalFilename(),
                     doc.getLastModified(),
@@ -153,6 +150,40 @@ public class MinioStorageServiceImpl implements MinioStorageService{
         } catch (Exception e) {
             throw new RuntimeException("Failed to upload file to MinIO", e);
         }
+    }
+
+    private String getMinioFileUrl(
+            boolean isPublic,
+            String bucketName,
+            String objectName,
+            ZonedDateTime now,
+            FileDocument doc) throws ServerException, InsufficientDataException, ErrorResponseException,
+            IOException, NoSuchAlgorithmException, InvalidKeyException,
+            InvalidResponseException, XmlParserException, InternalException {
+        // Return DTO with correct URL depending on visibility
+        String url;
+        if (isPublic) {
+            url = buildPublicUrl(minioUrl, bucketName, objectName);
+        } else {
+            url = minioClient.getPresignedObjectUrl(
+                    GetPresignedObjectUrlArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectName)
+                            .method(Method.GET)
+                            .expiry(Integer.parseInt(expiryHours), TimeUnit.HOURS)
+                            .build()
+            );
+            Date oneHourLaterDate = Date
+                    .from(now.plusHours(Long
+                                    .parseLong(expiryHours))
+                            .toInstant());
+            doc.setExpiryDateTime(oneHourLaterDate);
+            doc.setExpiryHourTime(Integer.parseInt(expiryHours));
+
+        }
+        doc.setFileUrl(url);
+
+        return url;
     }
 
     private String buildPublicUrl(String endpoint, String bucketName, String objectName) {
@@ -184,5 +215,39 @@ public class MinioStorageServiceImpl implements MinioStorageService{
         }
 
         return null;
+    }
+
+    @Override
+    public FileDocumentDto getFileDocumentInformation(String id) {
+
+        try {
+
+            Optional<FileDocument> fileDocOpt = fileDocumentRepository
+                    .findFirstByIdOrEtagAndIsPublicFalseAndArchivedFalse(id, id);
+
+            if (fileDocOpt.isPresent()) {
+                FileDocument fileDocument = fileDocOpt.get();
+                // Generate new signed URL if file is private
+                String url = getMinioFileUrl(fileDocument.isPublic(), fileDocument.getBucket(), fileDocument.getObjectName(), ZonedDateTime.now(), fileDocument);
+                fileDocumentRepository.save(fileDocument); // Update the document with the new URL
+
+
+                return new FileDocumentDto(
+                        fileDocument.getId(),
+                        fileDocument.getEtag(),
+                        fileDocument.getOriginalFilename(),
+                        fileDocument.getLastModified(),
+                        fileDocument.getSize(),
+                        url
+                );
+
+            } else {
+                return null;
+            }
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
     }
 }

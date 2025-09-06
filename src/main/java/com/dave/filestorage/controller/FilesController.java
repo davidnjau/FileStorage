@@ -25,7 +25,7 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import java.io.InputStream;
 
 @Tag(description = "Use these resource to save file in the system.", name = "File system module")
-@RequestMapping("/files")
+@RequestMapping("/files/")
 @RestController
 public class FilesController {
 
@@ -39,7 +39,7 @@ public class FilesController {
                     content = { @Content(examples = { @ExampleObject(value = "") }) }),
             @ApiResponse(responseCode = "404", description = "${api.response-codes.notFound.desc}",
                     content = { @Content(examples = { @ExampleObject(value = "") }) }) })
-    @PostMapping("/upload")
+    @PostMapping("upload")
     public ResponseEntity<?> uploadFile(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "fileType", required = false) String fileType,
@@ -71,7 +71,7 @@ public class FilesController {
                     content = { @Content(examples = { @ExampleObject(value = "") }) }),
             @ApiResponse(responseCode = "404", description = "${api.response-codes.notFound.desc}",
                     content = { @Content(examples = { @ExampleObject(value = "") }) }) })
-    @GetMapping("/download/{eTagId}")
+    @GetMapping("download/{eTagId}")
     public ResponseEntity<?> downloadFileByETag(@PathVariable String eTagId) {
 
         try{
@@ -90,4 +90,21 @@ public class FilesController {
         }
 
     }
+
+    @GetMapping("refresh/{id}")
+    public ResponseEntity<?> getFileUrl(@PathVariable String id) {
+        try {
+
+            FileDocumentDto fileDocumentDto = minioStorageService.getFileDocumentInformation(id);
+
+            return ResponseEntity.ok(fileDocumentDto);
+        } catch (Exception e) {
+            e.printStackTrace();
+            ResponseBodyDto responseBody = new ResponseBodyDto(
+                    "Failed to upload file. Please try again later."
+            );
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(responseBody);
+        }
+    }
+
 }
