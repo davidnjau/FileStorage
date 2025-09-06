@@ -42,13 +42,16 @@ public class FilesController {
     @PostMapping("/upload")
     public ResponseEntity<?> uploadFile(
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "fileType", required = false) String fileType) {
+            @RequestParam(value = "fileType", required = false) String fileType,
+            @RequestParam(value = "isPublic", required = false, defaultValue = "true") Boolean isPublic) {
 
         try {
 
+            boolean finalIsPublic = isPublic == null || isPublic;
+
             String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(fileType);
 
-            FileDocumentDto fileDocumentDto = minioStorageService.uploadFile(file, effectiveFileType);
+            FileDocumentDto fileDocumentDto = minioStorageService.uploadFile(file, effectiveFileType, finalIsPublic);
 
             return ResponseEntity.ok(fileDocumentDto);
         } catch (Exception e) {

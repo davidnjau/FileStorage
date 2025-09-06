@@ -30,6 +30,7 @@ public class FileDocument {
     // Optional: Add uploader ID or tags for tracking
     private String uploadedBy;
     private Map<String, String> customMetadata;
+    private String fileUrl;
 
     // Getters, Setters, Constructors
 
@@ -56,7 +57,7 @@ public class FileDocument {
     public FileDocument(String id, String originalFilename, String objectName, String bucket,
                         long size, String contentType, String etag, Date lastModified,
                         String presignedUrl, Date uploadedAt, String uploadedBy,
-                        Map<String, String> customMetadata) {
+                        Map<String, String> customMetadata, String fileUrl) {
         this.id = id;
         this.originalFilename = originalFilename;
         this.objectName = objectName;
@@ -69,6 +70,7 @@ public class FileDocument {
         this.uploadedAt = uploadedAt;
         this.uploadedBy = uploadedBy;
         this.customMetadata = customMetadata;
+        this.fileUrl = fileUrl;
     }
 
     public String getId() {
@@ -173,5 +175,13 @@ public class FileDocument {
 
     public void setArchived(boolean archived) {
         this.archived = archived;
+    }
+
+    public String getFileUrl() {
+        return fileUrl;
+    }
+
+    public void setFileUrl(String fileUrl) {
+        this.fileUrl = fileUrl;
     }
 }

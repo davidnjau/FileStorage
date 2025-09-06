@@ -1,4 +1,4 @@
-package com.dave.filestorage.storage;
+package com.dave.filestorage.minio;
 
 import io.minio.MinioClient;
 import org.springframework.beans.factory.annotation.Value;

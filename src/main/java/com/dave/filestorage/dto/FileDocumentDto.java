@@ -8,24 +8,17 @@ public class FileDocumentDto {
     private String fileName;
     private Date uploadedAt;
     private long size;
+    private String url;
 
     public FileDocumentDto() {
     }
 
-    /**
-     * Constructs a new FileDocumentDto with the specified details.
-     *
-     * @param fileId     the unique identifier of the file, typically the eTag from AWS S3 or minIO S3 bucket
-     * @param fileName   the name of the file
-     * @param uploadedAt the date and time when the file was uploaded
-     * @param size       the size of the file in bytes
-     */
-    public FileDocumentDto(String fileId, String fileName,
-                           Date uploadedAt, long size) {
+    public FileDocumentDto(String fileId, String fileName, Date uploadedAt, long size, String url) {
         this.fileId = fileId;
         this.fileName = fileName;
         this.uploadedAt = uploadedAt;
         this.size = size;
+        this.url = url;
     }
 
     public String getFileId() {
@@ -58,5 +51,13 @@ public class FileDocumentDto {
 
     public void setSize(long size) {
         this.size = size;
+    }
+
+    public String getUrl() {
+        return url;
+    }
+
+    public void setUrl(String url) {
+        this.url = url;
     }
 }

@@ -3,7 +3,10 @@ package com.dave.filestorage.storage;
 import com.dave.filestorage.db.FileDocument;
 import com.dave.filestorage.db.FileDocumentService;
 import com.dave.filestorage.dto.FileDocumentDto;
+import com.dave.filestorage.minio.MinioBucketService;
 import io.minio.*;
+import io.minio.http.Method;
+import org.checkerframework.checker.units.qual.A;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -13,9 +16,8 @@ import javax.annotation.PostConstruct;
 import java.io.InputStream;
 import java.time.ZonedDateTime;
 import java.time.format.TextStyle;
-import java.util.Date;
-import java.util.Locale;
-import java.util.Objects;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 // MinioStorageService.java
 @Service
@@ -30,8 +32,12 @@ public class MinioStorageServiceImpl implements MinioStorageService{
     @Autowired
     private FileMetadataWorker fileMetadataWorker;
 
-    @Value("${minio.bucketName}")
-    private String bucketName;
+    @Autowired
+    private MinioBucketService minioBucketService;
+
+    @Value("${minio.url}")
+    private String minioUrl;
+
 
     /**
      * Initializes the MinIO bucket if it does not already exist.
@@ -39,88 +45,120 @@ public class MinioStorageServiceImpl implements MinioStorageService{
      * It checks for the existence of the specified bucket and creates it if not found.
      */
     @PostConstruct
-    public void createBucket() {
-        try {
-            boolean found = minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucketName).build());
-            if (!found) {
-                minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucketName).build());
-            }
-        } catch (Exception e) {
-            // Handle exception
-        }
+    public void initBuckets() {
+        minioBucketService.createBuckets();
     }
 
     /**
-     * Uploads a file to the MinIO storage and creates a corresponding file document in the database.
+     * Uploads a file to MinIO and persists metadata.
      *
-     * @param file the file to be uploaded, represented as a MultipartFile.
-     * @param fileName the type of the file, used to categorize the file in a virtual folder.
-     * @return a FileDocumentDto containing the file's etag, original name, last modified date, and size.
-     * @throws Exception if an error occurs during the file upload or database operation.
+     * @param file     the file to be uploaded
+     * @param fileType the logical folder/category (e.g. "products", "invoices")
+     * @param isPublic whether the file should be accessible publicly
+     * @return a FileDocumentDto containing metadata and either a presigned URL (private) or direct URL (public)
      */
-    public FileDocumentDto uploadFile(MultipartFile file, String fileName) throws Exception  {
+    public FileDocumentDto uploadFile(MultipartFile file, String fileType, boolean isPublic) {
+        Objects.requireNonNull(file, "File cannot be null");
+        Objects.requireNonNull(fileType, "File type cannot be null");
 
-        String fileExtension = Objects.requireNonNull(file.getOriginalFilename())
-                .substring(file.getOriginalFilename()
-                        .lastIndexOf('.')).toLowerCase().replace(".", "");
+        try (InputStream inputStream = file.getInputStream()) {
 
-        String objectName = file.getOriginalFilename();
+            // Choose bucket based on visibility
+            String bucketName = isPublic ?
+                    minioBucketService.getPublicBucketName() :
+                    minioBucketService.getPrivateBucketName();
 
-        //get the year, month, and date from the system date
-        String year = String.valueOf(ZonedDateTime.now().getYear());
-        String month = String.format("%02d", ZonedDateTime.now().getMonthValue());
-        //Convert the month to a month name
-        String monthName = ZonedDateTime.now().getMonth().getDisplayName(TextStyle.FULL, Locale.getDefault());
-        String convertedMonthName = S3NamingSanitizer.sanitizeOrDefault(monthName);
+            // Extract extension
+            String fileExtension = Optional.ofNullable(file.getOriginalFilename())
+                    .filter(name -> name.contains("."))
+                    .map(name -> name.substring(name.lastIndexOf('.') + 1).toLowerCase())
+                    .orElse("unknown");
 
-        String date = String.format("%02d", ZonedDateTime.now().getDayOfMonth());
+            // Build structured object key: year/type/ext/month/day/originalName
+            ZonedDateTime now = ZonedDateTime.now();
+            String year = String.valueOf(now.getYear());
+            String monthName = now.getMonth().getDisplayName(TextStyle.FULL, Locale.ENGLISH);
+            String day = String.format("%02d", now.getDayOfMonth());
 
-        // Upload the file to MinIO e.g. year/products/jpeg/month/date/image.jpg
-        String newObjectName =
-                year + "/" +
-                fileName + "/" +
-                fileExtension + "/" +
-                convertedMonthName + "/" + date + "/" +
-                file.getOriginalFilename(); // Virtual folder
+            String objectName = String.format(
+                    "%s/%s/%s/%s/%s/%s",
+                    year,
+                    S3NamingSanitizer.sanitizeOrDefault(fileType),
+                    fileExtension,
+                    S3NamingSanitizer.sanitizeOrDefault(monthName),
+                    day,
+                    Objects.requireNonNull(file.getOriginalFilename())
+            );
 
-        minioClient.putObject(
-                PutObjectArgs.builder()
-                        .bucket(bucketName)
-                        .object(newObjectName)
-                        .stream(file.getInputStream(), file.getSize(), -1)
-                        .contentType(file.getContentType())
-                        .build());
+            // Upload to MinIO
+            minioClient.putObject(
+                    PutObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectName)
+                            .stream(inputStream, file.getSize(), -1)
+                            .contentType(file.getContentType())
+                            .build()
+            );
 
-        StatObjectResponse stat = minioClient.statObject(
-                StatObjectArgs.builder()
-                        .bucket(bucketName)
-                        .object(newObjectName)
-                        .build()
-        );
+            // Fetch stored metadata
+            StatObjectResponse stat = minioClient.statObject(
+                    StatObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectName)
+                            .build()
+            );
 
-        //Create the file document in your database
-        FileDocument doc = new FileDocument();
-        doc.setOriginalFilename(objectName);
-        doc.setObjectName(newObjectName);
-        doc.setBucket(bucketName);
-        doc.setSize(stat.size());
-        doc.setContentType(stat.contentType());
-        doc.setEtag(stat.etag());
-        Date lastMoifiedDate = Date.from(stat.lastModified().toInstant());
-        doc.setLastModified(lastMoifiedDate);
-        doc.setPresignedUrl(null);
-        doc.setUploadedAt(Date.from(ZonedDateTime.now().toInstant()));
-        doc.setUploadedBy(null);
-        fileMetadataWorker.persistMetadataAsync(doc);
+            // Return DTO with correct URL depending on visibility
+            String url;
+            if (isPublic) {
+                url = buildPublicUrl(minioUrl, bucketName, objectName);
+            } else {
+                url = minioClient.getPresignedObjectUrl(
+                        GetPresignedObjectUrlArgs.builder()
+                                .bucket(bucketName)
+                                .object(objectName)
+                                .method(Method.GET)
+                                .expiry(1, TimeUnit.HOURS)
+                                .build()
+                );
+            }
 
-        return new FileDocumentDto(
-                doc.getEtag(),
-                objectName,
-                doc.getLastModified(),
-                doc.getSize()
-        );
+            Map<String, String> metadata = stat.userMetadata();
+
+            // Persist metadata asynchronously
+            FileDocument doc = new FileDocument();
+            doc.setOriginalFilename(file.getOriginalFilename());
+            doc.setObjectName(objectName);
+            doc.setBucket(bucketName);
+            doc.setSize(stat.size());
+            doc.setContentType(stat.contentType());
+            doc.setEtag(stat.etag());
+            doc.setLastModified(Date.from(stat.lastModified().toInstant()));
+            doc.setUploadedAt(Date.from(now.toInstant()));
+            doc.setUploadedBy(null); // TODO: wire user context
+            doc.setFileUrl(url);
+            doc.setCustomMetadata(metadata);
+            doc.setArchived(false);
+            fileMetadataWorker.persistMetadataAsync(doc);
 
 
+            return new FileDocumentDto(
+                    doc.getEtag(),
+                    doc.getOriginalFilename(),
+                    doc.getLastModified(),
+                    doc.getSize(),
+                    url
+            );
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to upload file to MinIO", e);
+        }
+    }
+
+    private String buildPublicUrl(String endpoint, String bucketName, String objectName) {
+        // Ensure endpoint doesn’t end with slash
+        String baseUrl = endpoint.endsWith("/") ? endpoint.substring(0, endpoint.length() - 1) : endpoint;
+        return String.format("%s/%s/%s", baseUrl, bucketName, objectName);
     }
 
 

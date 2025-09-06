@@ -14,7 +14,7 @@ public interface MinioStorageService {
      * @return a FileDocumentDto containing metadata about the uploaded file
      * @throws Exception if an error occurs during the upload process
      */
-    FileDocumentDto uploadFile(MultipartFile file, String fileType) throws Exception;
+    FileDocumentDto uploadFile(MultipartFile file, String fileType, boolean isPublic) throws Exception;
     /**
      * Downloads a file from the Minio storage service using its ETag.
      *
