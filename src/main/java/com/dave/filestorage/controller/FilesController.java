@@ -1,7 +1,7 @@
 package com.dave.filestorage.controller;
 
 import com.dave.filestorage.dto.*;
-import com.dave.filestorage.storage.GarageNotificationServiceImpl;
+import com.dave.filestorage.storage.NotificationService;
 import com.dave.filestorage.storage.ObjectStorageService;
 import com.dave.filestorage.storage.S3NamingSanitizer;
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,7 +30,7 @@ public class FilesController {
     private ObjectStorageService objectStorageService;
 
     @Autowired
-    private GarageNotificationServiceImpl notificationService;
+    private NotificationService notificationService;
 
     @Operation(summary = "Upload a File", description = "Uploads a file to the server's file system.")
     @ApiResponses(value = {

@@ -1,8 +1,9 @@
-package com.dave.filestorage.storage;
+package com.dave.filestorage.storage.garage;
 
 import com.dave.filestorage.db.FileDocument;
 import com.dave.filestorage.db.FileDocumentService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -16,6 +17,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @Component
+@ConditionalOnProperty(name = "storage.provider", havingValue = "garage")
 public class GarageFileMetadataWorker {
 
     @Autowired

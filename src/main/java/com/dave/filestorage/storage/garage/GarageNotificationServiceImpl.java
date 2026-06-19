@@ -1,10 +1,12 @@
-package com.dave.filestorage.storage;
+package com.dave.filestorage.storage.garage;
 
 import com.dave.filestorage.db.NotificationWebhookConfig;
 import com.dave.filestorage.db.NotificationWebhookConfigRepository;
 import com.dave.filestorage.dto.WebhookConfigDto;
+import com.dave.filestorage.storage.NotificationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -14,7 +16,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-public class GarageNotificationServiceImpl {
+@ConditionalOnProperty(name = "storage.provider", havingValue = "garage")
+public class GarageNotificationServiceImpl implements NotificationService {
 
     @Autowired
     private NotificationWebhookConfigRepository webhookConfigRepository;
@@ -27,6 +30,7 @@ public class GarageNotificationServiceImpl {
 
     private final RestTemplate restTemplate = new RestTemplate();
 
+    @Override
     public WebhookConfigDto registerWebhook(WebhookConfigDto config) {
         NotificationWebhookConfig entity = new NotificationWebhookConfig();
         entity.setBucket(config.getBucket());
@@ -37,6 +41,7 @@ public class GarageNotificationServiceImpl {
         return config;
     }
 
+    @Override
     public void deregisterWebhook(String id) {
         webhookConfigRepository.findById(id).ifPresent(cfg -> {
             cfg.setActive(false);
@@ -44,6 +49,7 @@ public class GarageNotificationServiceImpl {
         });
     }
 
+    @Override
     public List<WebhookConfigDto> listWebhooks(String bucket) {
         List<NotificationWebhookConfig> configs = bucket != null
                 ? webhookConfigRepository.findByBucketAndActiveTrue(bucket)

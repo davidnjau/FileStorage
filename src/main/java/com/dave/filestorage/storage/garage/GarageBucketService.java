@@ -1,6 +1,7 @@
-package com.dave.filestorage.garage;
+package com.dave.filestorage.storage.garage;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
@@ -10,6 +11,7 @@ import java.util.Arrays;
 import java.util.List;
 
 @Service
+@ConditionalOnProperty(name = "storage.provider", havingValue = "garage")
 public class GarageBucketService {
 
     @Resource

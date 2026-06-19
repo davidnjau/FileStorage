@@ -1,12 +1,14 @@
-package com.dave.filestorage.storage;
+package com.dave.filestorage.storage.garage;
 
 import com.dave.filestorage.db.FileDocument;
 import com.dave.filestorage.db.FileDocumentRepository;
 import com.dave.filestorage.db.FileDocumentService;
 import com.dave.filestorage.dto.*;
-import com.dave.filestorage.garage.GarageBucketService;
+import com.dave.filestorage.storage.ObjectStorageService;
+import com.dave.filestorage.storage.S3NamingSanitizer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.ResponseInputStream;
@@ -28,7 +30,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
-public class GarageStorageServiceImpl implements GarageStorageService {
+@ConditionalOnProperty(name = "storage.provider", havingValue = "garage")
+public class GarageStorageServiceImpl implements ObjectStorageService {
 
     @Autowired
     private S3Client garageS3Client;
