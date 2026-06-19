@@ -7,7 +7,6 @@ import com.dave.filestorage.dto.FileDocumentDto;
 import com.dave.filestorage.garage.GarageBucketService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -28,7 +27,6 @@ import java.util.Objects;
 import java.util.Optional;
 
 @Service
-@ConditionalOnProperty(name = "storage.provider", havingValue = "garage")
 public class GarageStorageServiceImpl implements GarageStorageService {
 
     @Autowired
