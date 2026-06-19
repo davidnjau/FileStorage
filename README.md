@@ -1,32 +1,45 @@
 # 📂 File Manager Microservice
 
-A Spring Boot microservice for secure file upload, storage, and metadata tracking using **MinIO** (S3-compatible object store) and **MongoDB** for metadata persistence.
+A Spring Boot microservice for secure file upload, storage, and metadata tracking using **Garage** (S3-compatible object store) and **MongoDB** for metadata persistence.
 
 ## 🚀 Features
-- Upload files to MinIO with dynamic `fileType` paths
+- Upload files to Garage with dynamic `fileType` paths
 - Store file metadata (name, size, type, ETag, timestamps, uploader) in MongoDB
-- Presigned URL generation for secure access
-- Asynchronous metadata persistence with retry + MinIO tagging
-- Health-checked containerized setup via Docker Compose
+- Presigned URL generation for secure private file access
+- Public/private bucket support with S3 bucket policies
+- Asynchronous metadata persistence with object tagging via AWS SDK v2
 
 ## 🛠️ Tech Stack
-- Java 17, Spring Boot
-- MinIO (S3-compatible)
-- MongoDB (with initialization script)
+- Java 11, Spring Boot 2.7
+- Garage (S3-compatible object store) via AWS SDK v2
+- MongoDB
 - Docker & Docker Compose
-- Lombok, Spring Web, Spring Data MongoDB
 
 ## ⚙️ Configuration
-Set environment variables in `configurations/.env`:
 
+### 1. Generate the Garage RPC secret
+```bash
+openssl rand -hex 32
+```
+
+### 2. Set environment variables in `configurations/.env`
 ```env
-MINIO_ROOT_USER=
-MINIO_ROOT_PASSWORD=
-MINIO_BUCKET_NAME=
+GARAGE_ACCESS_KEY=
+GARAGE_SECRET_KEY=
+GARAGE_RPC_SECRET=
 
 MONGO_INITDB_ROOT_USERNAME=
 MONGO_INITDB_ROOT_PASSWORD=
 MONGO_INITDB_DATABASE=
+```
+
+### 3. Update `configurations/garage.toml`
+Replace `rpc_secret` with the value generated above.
+
+### 4. Update `src/main/resources/application.properties`
+```properties
+garage.accessKey=your-garage-access-key
+garage.secretKey=your-garage-secret-key
 ```
 
 ## 🐳 Running with Docker Compose
@@ -34,37 +47,57 @@ MONGO_INITDB_DATABASE=
 docker-compose --env-file configurations/.env -f configurations/docker-compose-combined.yaml up -d
 ```
 
-## 📤 File Upload API
-**POST** `/upload`
+### First-time Garage setup
+After the container starts, create a layout, key, and allow bucket access:
+```bash
+# Assign the node to a zone
+docker exec garage garage layout assign -z dc1 -c 1G <node-id>
+docker exec garage garage layout apply --version 1
 
-| Parameter   | Type            | Required | Description            |
-|-------------|------------------|----------|------------------------|
-| `file`      | Multipart file   | ✅       | File to upload         |
-| `fileType`  | String           | ❌       | Folder prefix (e.g. `profile-pics`) |
+# Create an access key
+docker exec garage garage key create my-key
+
+# Allow the key to access your buckets
+docker exec garage garage bucket allow --read --write --owner ecommerce-public --key my-key
+docker exec garage garage bucket allow --read --write --owner ecommerce-private --key my-key
+```
+The node ID is printed in the container logs on first startup.
+
+## 📤 API Endpoints
+
+### Upload a file
+**POST** `/files/upload`
+
+| Parameter  | Type           | Required | Description                              |
+|------------|----------------|----------|------------------------------------------|
+| `file`     | Multipart file | ✅       | File to upload                           |
+| `fileType` | String         | ❌       | Folder prefix (e.g. `profile-pics`)      |
+| `isPublic` | Boolean        | ❌       | `true` = direct URL, `false` = presigned (default: `true`) |
+
+### Download a file
+**GET** `/files/download/{eTagId}`
+
+### Refresh presigned URL
+**GET** `/files/refresh/{id}`
 
 ## 📦 MongoDB Document Structure
 ```json
 {
   "originalFilename": "report.pdf",
-  "objectName": "docs/report-123.pdf",
-  "bucket": "ecommerce-bucket",
+  "objectName": "2026/docs/pdf/june/19/report.pdf",
+  "bucket": "ecommerce-private",
   "size": 54321,
   "etag": "abc123etag",
   "contentType": "application/pdf",
-  "uploadedBy": "admin",
-  "customMetadata": {
-    "source": "dashboard"
-  }
+  "fileUrl": "http://localhost:3900/...",
+  "isPublic": false,
+  "expiryHourTime": 1
 }
 ```
 
-## ✅ Health Checks
-- MinIO: `curl http://localhost:9000/minio/health/live`
-- MongoDB: ping via `mongosh`
-
 ## 🧪 Running Tests
 ```bash
-mvn clean test
+./mvnw test
 ```
 
 ## 📜 License
