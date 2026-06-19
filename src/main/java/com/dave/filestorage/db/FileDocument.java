@@ -35,6 +35,11 @@ public class FileDocument {
     private String fileUrl;
     private boolean isPublic;
     private Integer expiryHourTime; // Optional: Add an expiry time for the presigned URL
+    private String uploadId;
+    private String uploadStatus;
+    private Integer totalParts;
+    private String versionId;
+    private String sseAlgorithm;
 
     // Getters, Setters, Constructors
 
@@ -211,5 +216,45 @@ public class FileDocument {
 
     public void setExpiryHourTime(Integer expiryHourTime) {
         this.expiryHourTime = expiryHourTime;
+    }
+
+    public String getUploadId() {
+        return uploadId;
+    }
+
+    public void setUploadId(String uploadId) {
+        this.uploadId = uploadId;
+    }
+
+    public String getUploadStatus() {
+        return uploadStatus;
+    }
+
+    public void setUploadStatus(String uploadStatus) {
+        this.uploadStatus = uploadStatus;
+    }
+
+    public Integer getTotalParts() {
+        return totalParts;
+    }
+
+    public void setTotalParts(Integer totalParts) {
+        this.totalParts = totalParts;
+    }
+
+    public String getVersionId() {
+        return versionId;
+    }
+
+    public void setVersionId(String versionId) {
+        this.versionId = versionId;
+    }
+
+    public String getSseAlgorithm() {
+        return sseAlgorithm;
+    }
+
+    public void setSseAlgorithm(String sseAlgorithm) {
+        this.sseAlgorithm = sseAlgorithm;
     }
 }

@@ -3,28 +3,29 @@ package com.dave.filestorage.storage;
 import com.dave.filestorage.db.FileDocument;
 import com.dave.filestorage.db.FileDocumentRepository;
 import com.dave.filestorage.db.FileDocumentService;
-import com.dave.filestorage.dto.FileDocumentDto;
+import com.dave.filestorage.dto.*;
 import com.dave.filestorage.garage.GarageBucketService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import javax.annotation.PostConstruct;
 import java.io.InputStream;
 import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.time.format.TextStyle;
-import java.util.Date;
-import java.util.Locale;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class GarageStorageServiceImpl implements GarageStorageService {
@@ -52,6 +53,15 @@ public class GarageStorageServiceImpl implements GarageStorageService {
 
     @Value("${garage.expiry.hours}")
     private String expiryHours;
+
+    @Value("${storage.encryption.sse-s3.enabled:false}")
+    private boolean sseEnabled;
+
+    @Value("${storage.multipart.part-size-bytes:5242880}")
+    private long partSizeBytes;
+
+    @Value("${storage.presigned.put.expiry-minutes:15}")
+    private int presignedPutExpiryMinutes;
 
     @PostConstruct
     public void initBuckets() {
@@ -89,12 +99,15 @@ public class GarageStorageServiceImpl implements GarageStorageService {
                     Objects.requireNonNull(file.getOriginalFilename())
             );
 
-            garageS3Client.putObject(
-                    PutObjectRequest.builder()
-                            .bucket(bucketName)
-                            .key(objectName)
-                            .contentType(file.getContentType())
-                            .build(),
+            PutObjectRequest.Builder putReqBuilder = PutObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(objectName)
+                    .contentType(file.getContentType());
+            if (sseEnabled) {
+                putReqBuilder.serverSideEncryption(ServerSideEncryption.AES256);
+            }
+            PutObjectResponse putResp = garageS3Client.putObject(
+                    putReqBuilder.build(),
                     RequestBody.fromInputStream(inputStream, file.getSize())
             );
 
@@ -122,6 +135,8 @@ public class GarageStorageServiceImpl implements GarageStorageService {
             doc.setFileUrl(url);
             doc.setArchived(false);
             doc.setPublic(isPublic);
+            doc.setVersionId(putResp.versionId());
+            if (sseEnabled) doc.setSseAlgorithm("AES256");
             garageFileMetadataWorker.persistMetadataAsync(doc);
 
             return new FileDocumentDto(
@@ -178,6 +193,250 @@ public class GarageStorageServiceImpl implements GarageStorageService {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public MultipartInitiateResponseDto initiateMultipartUpload(String filename, String fileType,
+            String contentType, boolean isPublic) throws Exception {
+        String bucketName = isPublic ? garageBucketService.getPublicBucketName()
+                                     : garageBucketService.getPrivateBucketName();
+        ZonedDateTime now = ZonedDateTime.now();
+        String ext = filename.contains(".")
+                ? filename.substring(filename.lastIndexOf('.') + 1).toLowerCase() : "unknown";
+        String monthName = now.getMonth().getDisplayName(TextStyle.FULL, Locale.ENGLISH);
+        String objectName = String.format("%s/%s/%s/%s/%02d/%s",
+                now.getYear(), S3NamingSanitizer.sanitizeOrDefault(fileType), ext,
+                S3NamingSanitizer.sanitizeOrDefault(monthName), now.getDayOfMonth(), filename);
+
+        CreateMultipartUploadRequest.Builder req = CreateMultipartUploadRequest.builder()
+                .bucket(bucketName).key(objectName).contentType(contentType);
+        if (sseEnabled) req.serverSideEncryption(ServerSideEncryption.AES256);
+        CreateMultipartUploadResponse resp = garageS3Client.createMultipartUpload(req.build());
+
+        FileDocument doc = new FileDocument();
+        doc.setOriginalFilename(filename);
+        doc.setObjectName(objectName);
+        doc.setBucket(bucketName);
+        doc.setUploadId(resp.uploadId());
+        doc.setUploadStatus("in_progress");
+        doc.setPublic(isPublic);
+        doc.setUploadedAt(Date.from(now.toInstant()));
+        fileDocumentRepository.save(doc);
+
+        return new MultipartInitiateResponseDto(resp.uploadId(), objectName, bucketName);
+    }
+
+    @Override
+    public String uploadPart(String bucket, String objectName, String uploadId,
+            int partNumber, InputStream data, long partSize) throws Exception {
+        UploadPartResponse resp = garageS3Client.uploadPart(
+                UploadPartRequest.builder()
+                        .bucket(bucket).key(objectName)
+                        .uploadId(uploadId).partNumber(partNumber).build(),
+                RequestBody.fromInputStream(data, partSize));
+        return resp.eTag();
+    }
+
+    @Override
+    public FileDocumentDto completeMultipartUpload(MultipartCompleteRequestDto request) throws Exception {
+        List<CompletedPart> parts = request.getParts().stream()
+                .map(p -> CompletedPart.builder()
+                        .partNumber(p.getPartNumber()).eTag(p.getETag()).build())
+                .collect(Collectors.toList());
+
+        CompleteMultipartUploadResponse resp = garageS3Client.completeMultipartUpload(
+                CompleteMultipartUploadRequest.builder()
+                        .bucket(request.getBucket()).key(request.getObjectName())
+                        .uploadId(request.getUploadId())
+                        .multipartUpload(CompletedMultipartUpload.builder().parts(parts).build())
+                        .build());
+
+        HeadObjectResponse head = garageS3Client.headObject(
+                HeadObjectRequest.builder()
+                        .bucket(request.getBucket()).key(request.getObjectName()).build());
+
+        ZonedDateTime now = ZonedDateTime.now();
+        Optional<FileDocument> existing = fileDocumentRepository
+                .findFirstByBucketAndObjectName(request.getBucket(), request.getObjectName());
+        FileDocument doc = existing.orElse(new FileDocument());
+        boolean isPublic = doc.isPublic();
+        String url = buildFileUrl(isPublic, request.getBucket(), request.getObjectName(), now, doc);
+
+        doc.setEtag(head.eTag().replace("\"", ""));
+        doc.setSize(head.contentLength());
+        doc.setContentType(head.contentType());
+        doc.setLastModified(Date.from(head.lastModified()));
+        doc.setUploadStatus("completed");
+        doc.setVersionId(resp.versionId());
+        doc.setArchived(false);
+        fileDocumentRepository.save(doc);
+
+        return new FileDocumentDto(doc.getId(), doc.getEtag(), doc.getOriginalFilename(),
+                doc.getLastModified(), doc.getSize(), url);
+    }
+
+    @Override
+    public void abortMultipartUpload(String bucket, String objectName, String uploadId) throws Exception {
+        garageS3Client.abortMultipartUpload(
+                AbortMultipartUploadRequest.builder()
+                        .bucket(bucket).key(objectName).uploadId(uploadId).build());
+        fileDocumentRepository.findFirstByBucketAndObjectName(bucket, objectName)
+                .ifPresent(doc -> {
+                    doc.setUploadStatus("aborted");
+                    fileDocumentRepository.save(doc);
+                });
+    }
+
+    @Override
+    public PresignedUploadResponseDto generatePresignedUploadUrl(String filename, String fileType,
+            String contentType, boolean isPublic) throws Exception {
+        String bucketName = isPublic ? garageBucketService.getPublicBucketName()
+                                     : garageBucketService.getPrivateBucketName();
+        ZonedDateTime now = ZonedDateTime.now();
+        String ext = filename.contains(".")
+                ? filename.substring(filename.lastIndexOf('.') + 1).toLowerCase() : "unknown";
+        String monthName = now.getMonth().getDisplayName(TextStyle.FULL, Locale.ENGLISH);
+        String objectName = String.format("%s/%s/%s/%s/%02d/%s",
+                now.getYear(), S3NamingSanitizer.sanitizeOrDefault(fileType), ext,
+                S3NamingSanitizer.sanitizeOrDefault(monthName), now.getDayOfMonth(), filename);
+
+        PresignedPutObjectRequest presigned = garageS3Presigner.presignPutObject(
+                PutObjectPresignRequest.builder()
+                        .signatureDuration(Duration.ofMinutes(presignedPutExpiryMinutes))
+                        .putObjectRequest(r -> r.bucket(bucketName).key(objectName).contentType(contentType))
+                        .build());
+
+        Date expiresAt = Date.from(now.plusMinutes(presignedPutExpiryMinutes).toInstant());
+        return new PresignedUploadResponseDto(
+                presigned.url().toString(), objectName, bucketName, expiresAt);
+    }
+
+    @Override
+    public FileDocumentDto confirmPresignedUpload(PresignedUploadConfirmDto confirm) throws Exception {
+        HeadObjectResponse head = garageS3Client.headObject(
+                HeadObjectRequest.builder()
+                        .bucket(confirm.getBucket()).key(confirm.getObjectName()).build());
+
+        ZonedDateTime now = ZonedDateTime.now();
+        boolean isPublic = Boolean.TRUE.equals(confirm.getIsPublic());
+        FileDocument doc = new FileDocument();
+        String url = buildFileUrl(isPublic, confirm.getBucket(), confirm.getObjectName(), now, doc);
+
+        doc.setOriginalFilename(confirm.getOriginalFilename());
+        doc.setObjectName(confirm.getObjectName());
+        doc.setBucket(confirm.getBucket());
+        doc.setSize(head.contentLength());
+        doc.setContentType(head.contentType());
+        doc.setEtag(head.eTag().replace("\"", ""));
+        doc.setLastModified(Date.from(head.lastModified()));
+        doc.setUploadedAt(Date.from(now.toInstant()));
+        doc.setPublic(isPublic);
+        doc.setArchived(false);
+        if (sseEnabled) doc.setSseAlgorithm("AES256");
+        garageFileMetadataWorker.persistMetadataAsync(doc);
+
+        return new FileDocumentDto(doc.getEtag(), doc.getEtag(), doc.getOriginalFilename(),
+                doc.getLastModified(), doc.getSize(), url);
+    }
+
+    @Override
+    public RangeDownloadResult downloadFileRange(String etag, long rangeStart, long rangeEnd) throws Exception {
+        FileDocument doc = fileDocumentService.findByEtag(etag);
+        if (doc == null) return null;
+
+        HeadObjectResponse head = garageS3Client.headObject(
+                HeadObjectRequest.builder()
+                        .bucket(doc.getBucket()).key(doc.getObjectName()).build());
+        long totalSize = head.contentLength();
+        long end = rangeEnd < 0 ? totalSize - 1 : Math.min(rangeEnd, totalSize - 1);
+
+        ResponseInputStream<GetObjectResponse> stream = garageS3Client.getObject(
+                GetObjectRequest.builder()
+                        .bucket(doc.getBucket()).key(doc.getObjectName())
+                        .range("bytes=" + rangeStart + "-" + end)
+                        .build());
+
+        return new RangeDownloadResult(stream, end - rangeStart + 1, rangeStart, end, totalSize);
+    }
+
+    @Override
+    public InputStream downloadFileEtagWithVersion(String etag, String versionId) throws Exception {
+        FileDocument doc = fileDocumentService.findByEtag(etag);
+        if (doc == null) return null;
+        GetObjectRequest.Builder req = GetObjectRequest.builder()
+                .bucket(doc.getBucket()).key(doc.getObjectName());
+        if (versionId != null && !versionId.isEmpty()) req.versionId(versionId);
+        return garageS3Client.getObject(req.build());
+    }
+
+    @Override
+    public List<FileVersionDto> listFileVersions(String etag) throws Exception {
+        FileDocument doc = fileDocumentService.findByEtag(etag);
+        if (doc == null) return Collections.emptyList();
+
+        ListObjectVersionsResponse resp = garageS3Client.listObjectVersions(
+                ListObjectVersionsRequest.builder()
+                        .bucket(doc.getBucket()).prefix(doc.getObjectName()).build());
+
+        return resp.versions().stream()
+                .map(v -> new FileVersionDto(
+                        v.versionId(),
+                        Date.from(v.lastModified()),
+                        v.size(),
+                        v.eTag().replace("\"", ""),
+                        v.isLatest()))
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public ObjectCopyResponseDto copyObject(ObjectCopyRequestDto request) throws Exception {
+        FileDocument src = fileDocumentService.findByEtag(request.getSourceEtag());
+        if (src == null) throw new RuntimeException("Source file not found");
+
+        String destBucket = request.getDestinationBucket() != null
+                ? request.getDestinationBucket() : src.getBucket();
+        String destFilename = request.getDestinationFilename() != null
+                ? request.getDestinationFilename() : src.getOriginalFilename();
+        String destObjectName = src.getObjectName()
+                .substring(0, src.getObjectName().lastIndexOf('/') + 1) + destFilename;
+
+        CopyObjectResponse copyResp = garageS3Client.copyObject(
+                CopyObjectRequest.builder()
+                        .sourceBucket(src.getBucket()).sourceKey(src.getObjectName())
+                        .destinationBucket(destBucket).destinationKey(destObjectName)
+                        .build());
+
+        String newEtag = copyResp.copyObjectResult().eTag().replace("\"", "");
+        ZonedDateTime now = ZonedDateTime.now();
+        FileDocument newDoc = new FileDocument();
+        boolean isPublic = src.isPublic();
+        String url = buildFileUrl(isPublic, destBucket, destObjectName, now, newDoc);
+
+        newDoc.setOriginalFilename(destFilename);
+        newDoc.setObjectName(destObjectName);
+        newDoc.setBucket(destBucket);
+        newDoc.setSize(src.getSize());
+        newDoc.setContentType(src.getContentType());
+        newDoc.setEtag(newEtag);
+        newDoc.setLastModified(Date.from(now.toInstant()));
+        newDoc.setUploadedAt(Date.from(now.toInstant()));
+        newDoc.setPublic(isPublic);
+        newDoc.setArchived(false);
+        fileDocumentRepository.save(newDoc);
+
+        return new ObjectCopyResponseDto(newEtag, destObjectName, destBucket, url);
+    }
+
+    @Override
+    public ObjectCopyResponseDto moveObject(ObjectCopyRequestDto request) throws Exception {
+        FileDocument src = fileDocumentService.findByEtag(request.getSourceEtag());
+        ObjectCopyResponseDto result = copyObject(request);
+        garageS3Client.deleteObject(
+                DeleteObjectRequest.builder()
+                        .bucket(src.getBucket()).key(src.getObjectName()).build());
+        src.setArchived(true);
+        fileDocumentRepository.save(src);
+        return result;
     }
 
     private String buildFileUrl(boolean isPublic, String bucketName, String objectName,
