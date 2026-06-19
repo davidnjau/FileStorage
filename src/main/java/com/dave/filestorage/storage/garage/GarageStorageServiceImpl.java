@@ -3,6 +3,7 @@ package com.dave.filestorage.storage.garage;
 import com.dave.filestorage.db.FileDocument;
 import com.dave.filestorage.db.FileDocumentRepository;
 import com.dave.filestorage.db.FileDocumentService;
+import com.dave.filestorage.config.StorageProperties;
 import com.dave.filestorage.dto.*;
 import com.dave.filestorage.storage.ObjectStorageService;
 import com.dave.filestorage.storage.S3NamingSanitizer;
@@ -57,14 +58,8 @@ public class GarageStorageServiceImpl implements ObjectStorageService {
     @Value("${garage.expiry.hours}")
     private String expiryHours;
 
-    @Value("${storage.encryption.sse-s3.enabled:false}")
-    private boolean sseEnabled;
-
-    @Value("${storage.multipart.part-size-bytes:5242880}")
-    private long partSizeBytes;
-
-    @Value("${storage.presigned.put.expiry-minutes:15}")
-    private int presignedPutExpiryMinutes;
+    @Autowired
+    private StorageProperties storageProperties;
 
     @PostConstruct
     public void initBuckets() {
@@ -106,7 +101,7 @@ public class GarageStorageServiceImpl implements ObjectStorageService {
                     .bucket(bucketName)
                     .key(objectName)
                     .contentType(file.getContentType());
-            if (sseEnabled) {
+            if (storageProperties.getEncryption().getSseS3().isEnabled()) {
                 putReqBuilder.serverSideEncryption(ServerSideEncryption.AES256);
             }
             PutObjectResponse putResp = garageS3Client.putObject(
@@ -139,7 +134,7 @@ public class GarageStorageServiceImpl implements ObjectStorageService {
             doc.setArchived(false);
             doc.setPublic(isPublic);
             doc.setVersionId(putResp.versionId());
-            if (sseEnabled) doc.setSseAlgorithm("AES256");
+            if (storageProperties.getEncryption().getSseS3().isEnabled()) doc.setSseAlgorithm("AES256");
             garageFileMetadataWorker.persistMetadataAsync(doc);
 
             return new FileDocumentDto(
@@ -213,7 +208,7 @@ public class GarageStorageServiceImpl implements ObjectStorageService {
 
         CreateMultipartUploadRequest.Builder req = CreateMultipartUploadRequest.builder()
                 .bucket(bucketName).key(objectName).contentType(contentType);
-        if (sseEnabled) req.serverSideEncryption(ServerSideEncryption.AES256);
+        if (storageProperties.getEncryption().getSseS3().isEnabled()) req.serverSideEncryption(ServerSideEncryption.AES256);
         CreateMultipartUploadResponse resp = garageS3Client.createMultipartUpload(req.build());
 
         FileDocument doc = new FileDocument();
@@ -303,6 +298,7 @@ public class GarageStorageServiceImpl implements ObjectStorageService {
                 now.getYear(), S3NamingSanitizer.sanitizeOrDefault(fileType), ext,
                 S3NamingSanitizer.sanitizeOrDefault(monthName), now.getDayOfMonth(), filename);
 
+        int presignedPutExpiryMinutes = storageProperties.getPresigned().getPut().getExpiryMinutes();
         PresignedPutObjectRequest presigned = garageS3Presigner.presignPutObject(
                 PutObjectPresignRequest.builder()
                         .signatureDuration(Duration.ofMinutes(presignedPutExpiryMinutes))
@@ -335,7 +331,7 @@ public class GarageStorageServiceImpl implements ObjectStorageService {
         doc.setUploadedAt(Date.from(now.toInstant()));
         doc.setPublic(isPublic);
         doc.setArchived(false);
-        if (sseEnabled) doc.setSseAlgorithm("AES256");
+        if (storageProperties.getEncryption().getSseS3().isEnabled()) doc.setSseAlgorithm("AES256");
         garageFileMetadataWorker.persistMetadataAsync(doc);
 
         return new FileDocumentDto(doc.getEtag(), doc.getEtag(), doc.getOriginalFilename(),

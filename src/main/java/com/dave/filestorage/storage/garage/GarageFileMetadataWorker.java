@@ -2,6 +2,8 @@ package com.dave.filestorage.storage.garage;
 
 import com.dave.filestorage.db.FileDocument;
 import com.dave.filestorage.db.FileDocumentService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Async;
@@ -19,6 +21,8 @@ import java.util.stream.Collectors;
 @Component
 @ConditionalOnProperty(name = "storage.provider", havingValue = "garage")
 public class GarageFileMetadataWorker {
+
+    private static final Logger log = LoggerFactory.getLogger(GarageFileMetadataWorker.class);
 
     @Autowired
     private FileDocumentService fileDocumentService;
@@ -42,10 +46,10 @@ public class GarageFileMetadataWorker {
             try {
                 tagObjectInGarage(doc, tags);
             } catch (Exception taggingEx) {
-                System.err.printf("Failed to tag Garage object [%s]: %s%n", doc.getObjectName(), taggingEx.getMessage());
+                log.error("Failed to tag Garage object [{}]: {}", doc.getObjectName(), taggingEx.getMessage());
             }
 
-            System.err.printf("Failed to persist metadata for [%s]: %s%n", doc.getObjectName(), persistenceEx.getMessage());
+            log.error("Failed to persist metadata for [{}]: {}", doc.getObjectName(), persistenceEx.getMessage(), persistenceEx);
         }
     }
 

@@ -2,6 +2,8 @@ package com.dave.filestorage.db;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -11,6 +13,11 @@ import java.util.Map;
 /**
  * MongoDB document storing file metadata alongside the binary stored in S3.
  */
+@CompoundIndexes({
+    @CompoundIndex(name = "bucket_objectname_idx", def = "{'bucket': 1, 'objectName': 1}"),
+    @CompoundIndex(name = "bucket_archived_idx", def = "{'bucket': 1, 'archived': 1}"),
+    @CompoundIndex(name = "uploadstatus_idx", def = "{'uploadStatus': 1, 'archived': 1}")
+})
 @Schema(description = "MongoDB document storing file metadata alongside the binary stored in S3")
 @Document(collection = "file_storage_metadata")
 public class FileDocument {

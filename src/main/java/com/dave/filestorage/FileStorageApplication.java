@@ -6,8 +6,10 @@ import io.swagger.v3.oas.annotations.info.Info;
 import io.swagger.v3.oas.annotations.servers.Server;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import com.dave.filestorage.config.StorageProperties;
 
 @OpenAPIDefinition(
     info = @Info(
@@ -23,6 +25,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 )
 @EnableAsync
 @EnableScheduling
+@EnableConfigurationProperties(StorageProperties.class)
 @SpringBootApplication
 public class FileStorageApplication {
 

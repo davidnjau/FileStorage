@@ -1,6 +1,7 @@
 package com.dave.filestorage.db;
 
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import java.util.List;
 
@@ -9,9 +10,11 @@ public class NotificationWebhookConfig {
 
     @Id
     private String id;
+    @Indexed
     private String bucket;
     private String webhookUrl;
     private List<String> events;
+    @Indexed
     private boolean active;
 
     public NotificationWebhookConfig() {

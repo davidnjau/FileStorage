@@ -4,6 +4,8 @@ import com.dave.filestorage.db.FileDocument;
 import com.dave.filestorage.db.FileDocumentService;
 import io.minio.MinioClient;
 import io.minio.SetObjectTagsArgs;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Async;
@@ -15,6 +17,8 @@ import java.util.Map;
 @Component
 @ConditionalOnProperty(name = "storage.provider", havingValue = "minio", matchIfMissing = true)
 public class MinioFileMetadataWorker {
+
+    private static final Logger log = LoggerFactory.getLogger(MinioFileMetadataWorker.class);
 
     @Autowired
     private FileDocumentService fileDocumentService;
@@ -38,10 +42,10 @@ public class MinioFileMetadataWorker {
             try {
                 tagObjectInMinIO(doc, tags);
             } catch (Exception taggingEx) {
-                System.err.printf("Failed to tag MinIO object [%s]: %s%n", doc.getObjectName(), taggingEx.getMessage());
+                log.error("Failed to tag MinIO object [{}]: {}", doc.getObjectName(), taggingEx.getMessage());
             }
 
-            System.err.printf("Failed to persist metadata for [%s]: %s%n", doc.getObjectName(), persistenceEx.getMessage());
+            log.error("Failed to persist metadata for [{}]: {}", doc.getObjectName(), persistenceEx.getMessage(), persistenceEx);
         }
     }
 

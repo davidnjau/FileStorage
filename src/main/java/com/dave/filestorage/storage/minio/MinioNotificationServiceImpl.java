@@ -4,11 +4,14 @@ import com.dave.filestorage.db.NotificationWebhookConfig;
 import com.dave.filestorage.db.NotificationWebhookConfigRepository;
 import com.dave.filestorage.dto.WebhookConfigDto;
 import com.dave.filestorage.storage.NotificationService;
+import com.dave.filestorage.util.WebhookUrlValidator;
 import io.minio.CloseableIterator;
 import io.minio.ListenBucketNotificationArgs;
 import io.minio.MinioClient;
 import io.minio.Result;
 import io.minio.messages.NotificationRecords;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -18,11 +21,14 @@ import org.springframework.web.client.RestTemplate;
 
 import javax.annotation.PostConstruct;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
 @ConditionalOnProperty(name = "storage.provider", havingValue = "minio", matchIfMissing = true)
 public class MinioNotificationServiceImpl implements NotificationService {
+
+    private static final Logger log = LoggerFactory.getLogger(MinioNotificationServiceImpl.class);
 
     @Autowired
     private MinioClient minioClient;
@@ -33,16 +39,28 @@ public class MinioNotificationServiceImpl implements NotificationService {
     @Value("${storage.notification.listener.enabled:false}")
     private boolean listenerEnabled;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final ConcurrentHashMap<String, CloseableIterator<Result<NotificationRecords>>> activeListeners = new ConcurrentHashMap<>();
+
+    private final RestTemplate restTemplate;
+
+    public MinioNotificationServiceImpl() {
+        org.springframework.http.client.SimpleClientHttpRequestFactory factory =
+                new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(5_000);
+        factory.setReadTimeout(10_000);
+        this.restTemplate = new RestTemplate(factory);
+    }
 
     @Override
     public WebhookConfigDto registerWebhook(WebhookConfigDto config) {
+        WebhookUrlValidator.validate(config.getWebhookUrl());
         NotificationWebhookConfig entity = new NotificationWebhookConfig();
         entity.setBucket(config.getBucket());
         entity.setWebhookUrl(config.getWebhookUrl());
         entity.setEvents(config.getEvents());
         entity.setActive(true);
-        webhookConfigRepository.save(entity);
+        NotificationWebhookConfig saved = webhookConfigRepository.save(entity);
+        config.setId(saved.getId());
         return config;
     }
 
@@ -74,6 +92,20 @@ public class MinioNotificationServiceImpl implements NotificationService {
             .forEach(this::listenBucket);
     }
 
+    @javax.annotation.PreDestroy
+    public void stopListeners() {
+        log.info("Stopping {} MinIO notification listeners", activeListeners.size());
+        activeListeners.forEach((bucket, iterator) -> {
+            try {
+                iterator.close();
+                log.info("Stopped listener for bucket [{}]", bucket);
+            } catch (Exception e) {
+                log.warn("Error closing listener for bucket [{}]: {}", bucket, e.getMessage());
+            }
+        });
+        activeListeners.clear();
+    }
+
     private void listenBucket(String bucket) {
         try {
             CloseableIterator<Result<NotificationRecords>> stream =
@@ -82,6 +114,7 @@ public class MinioNotificationServiceImpl implements NotificationService {
                         .bucket(bucket).prefix("").suffix("")
                         .events(new String[]{"s3:ObjectCreated:*", "s3:ObjectRemoved:*"})
                         .build());
+            activeListeners.put(bucket, stream);
             while (stream.hasNext()) {
                 NotificationRecords records = stream.next().get();
                 if (records.events() == null) continue;
@@ -91,8 +124,7 @@ public class MinioNotificationServiceImpl implements NotificationService {
                     hooks.forEach(hook -> postToWebhook(hook.getWebhookUrl(), event)));
             }
         } catch (Exception e) {
-            System.err.printf("Notification listener error for bucket [%s]: %s%n",
-                bucket, e.getMessage());
+            log.error("Notification listener error for bucket [{}]: {}", bucket, e.getMessage(), e);
         }
     }
 
@@ -100,7 +132,7 @@ public class MinioNotificationServiceImpl implements NotificationService {
         try {
             restTemplate.postForEntity(url, payload, String.class);
         } catch (Exception e) {
-            System.err.printf("Failed to post to webhook [%s]: %s%n", url, e.getMessage());
+            log.warn("Failed to post to webhook [{}]: {}", url, e.getMessage());
         }
     }
 }

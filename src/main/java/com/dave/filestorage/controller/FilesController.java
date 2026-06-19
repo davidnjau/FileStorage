@@ -12,6 +12,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
@@ -28,68 +30,60 @@ import java.io.InputStream;
 @RestController
 public class FilesController {
 
+    private static final Logger log = LoggerFactory.getLogger(FilesController.class);
+
     @Autowired
     private ObjectStorageService objectStorageService;
 
     @Autowired
     private NotificationService notificationService;
 
-    @Operation(
-        summary = "Upload a file",
-        description = "Uploads a file to the active S3 backend and persists metadata to MongoDB. " +
-            "Public files return a direct URL; private files return a presigned URL valid for the configured expiry period."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "File uploaded successfully",
-            content = @Content(schema = @Schema(implementation = FileDocumentDto.class))),
-        @ApiResponse(responseCode = "400", description = "Upload failed",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    @Operation(summary = "Upload a File", description = "Uploads a file to the configured S3-compatible backend.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "File uploaded successfully",
+                    content = @Content(schema = @Schema(implementation = FileDocumentDto.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid request",
+                    content = @Content(examples = @ExampleObject(value = ""))),
+            @ApiResponse(responseCode = "500", description = "Storage backend error",
+                    content = @Content(examples = @ExampleObject(value = "")))})
     @PostMapping("upload")
-    public ResponseEntity<?> uploadFile(
-            @Parameter(description = "File to upload", required = true)
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<FileDocumentDto>> uploadFile(
             @RequestParam("file") MultipartFile file,
-            @Parameter(description = "Logical category used as a path prefix in the object key (e.g. invoices, avatars)")
             @RequestParam(value = "fileType", required = false) String fileType,
-            @Parameter(description = "true = direct public URL, false = presigned private URL (default: true)")
-            @RequestParam(value = "isPublic", required = false, defaultValue = "true") Boolean isPublic) {
+            @RequestParam(value = "isPublic", required = false, defaultValue = "true") Boolean isPublic) throws Exception {
 
-        try {
-            boolean finalIsPublic = isPublic == null || isPublic;
-            String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(fileType);
-            FileDocumentDto fileDocumentDto = objectStorageService.uploadFile(file, effectiveFileType, finalIsPublic);
-            return ResponseEntity.ok(fileDocumentDto);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(new ResponseBodyDto("Failed to upload file. Please try again later."));
-        }
+        boolean finalIsPublic = isPublic == null || isPublic;
+        String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(fileType);
+        FileDocumentDto result = objectStorageService.uploadFile(file, effectiveFileType, finalIsPublic);
+        log.info("File uploaded: {} size={}", result.getFileName(), result.getSize());
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(result));
     }
 
-    @Operation(
-        summary = "Download a file",
-        description = "Downloads a file by its ETag. Supports partial content via the standard HTTP Range header " +
-            "(e.g. Range: bytes=0-1023). Returns 206 Partial Content when a range is requested."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Full file content"),
-        @ApiResponse(responseCode = "206", description = "Partial content (byte-range response)"),
-        @ApiResponse(responseCode = "400", description = "File not found or invalid ETag",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    @Operation(summary = "Download a File", description = "Download by ETag. Supports Range header for partial/streaming content.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Full file content"),
+            @ApiResponse(responseCode = "206", description = "Partial content (Range request)"),
+            @ApiResponse(responseCode = "404", description = "File not found"),
+            @ApiResponse(responseCode = "416", description = "Range not satisfiable")})
     @GetMapping("download/{eTagId}")
     public ResponseEntity<?> downloadFileByETag(
-            @Parameter(description = "ETag of the file to download")
             @PathVariable String eTagId,
-            @Parameter(description = "Optional byte range, e.g. bytes=0-1023", example = "bytes=0-1023")
-            @RequestHeader(value = HttpHeaders.RANGE, required = false) String rangeHeader) {
+            @RequestHeader(value = HttpHeaders.RANGE, required = false) String rangeHeader) throws Exception {
 
-        try {
-            if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+        if (rangeHeader != null) {
+            if (!rangeHeader.startsWith("bytes=")) {
+                return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                        .body(com.dave.filestorage.dto.ApiResponse.error("INVALID_RANGE", "Range header must use bytes= unit"));
+            }
+            try {
                 String[] rangeParts = rangeHeader.substring(6).split("-");
-                long start = Long.parseLong(rangeParts[0]);
-                long end = rangeParts.length > 1 && !rangeParts[1].isEmpty()
-                        ? Long.parseLong(rangeParts[1]) : -1L;
+                long start = Long.parseLong(rangeParts[0].trim());
+                long end = rangeParts.length > 1 && !rangeParts[1].trim().isEmpty()
+                        ? Long.parseLong(rangeParts[1].trim()) : -1L;
+                if (start < 0 || (end >= 0 && end < start)) {
+                    return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                            .body(com.dave.filestorage.dto.ApiResponse.error("INVALID_RANGE", "Invalid byte range: " + rangeHeader));
+                }
                 RangeDownloadResult result = objectStorageService.downloadFileRange(eTagId, start, end);
                 if (result == null) return ResponseEntity.notFound().build();
                 return ResponseEntity.status(HttpStatus.PARTIAL_CONTENT)
@@ -99,319 +93,175 @@ public class FilesController {
                         .contentLength(result.getContentLength())
                         .contentType(MediaType.APPLICATION_OCTET_STREAM)
                         .body(new InputStreamResource(result.getData()));
+            } catch (NumberFormatException ex) {
+                return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                        .body(com.dave.filestorage.dto.ApiResponse.error("INVALID_RANGE", "Malformed range header: " + rangeHeader));
             }
-
-            InputStream inputStream = objectStorageService.downloadFileEtag(eTagId);
-            InputStreamResource resource = new InputStreamResource(inputStream);
-            return ResponseEntity.ok()
-                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + eTagId + "\"")
-                    .body(resource);
-
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(new ResponseBodyDto("The provided id does not exist or is invalid. Please try again."));
         }
+
+        InputStream inputStream = objectStorageService.downloadFileEtag(eTagId);
+        if (inputStream == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + eTagId + "\"")
+                .body(new InputStreamResource(inputStream));
     }
 
-    @Operation(
-        summary = "Refresh presigned URL",
-        description = "Regenerates a fresh presigned URL for a private file. Useful when the previous URL has expired."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Fresh URL generated",
-            content = @Content(schema = @Schema(implementation = FileDocumentDto.class))),
-        @ApiResponse(responseCode = "400", description = "File not found",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    @Operation(summary = "Refresh presigned URL", description = "Regenerates and returns a fresh presigned URL for a private file.")
     @GetMapping("refresh/{id}")
-    public ResponseEntity<?> getFileUrl(@PathVariable String id) {
-        try {
-            FileDocumentDto fileDocumentDto = objectStorageService.getFileDocumentInformation(id);
-            return ResponseEntity.ok(fileDocumentDto);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(new ResponseBodyDto("Failed to upload file. Please try again later."));
-        }
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<FileDocumentDto>> getFileUrl(@PathVariable String id) throws Exception {
+        FileDocumentDto result = objectStorageService.getFileDocumentInformation(id);
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(result));
     }
 
-    // Multipart
-    @Operation(
-        summary = "Initiate multipart upload",
-        description = "Starts a multipart upload session. Returns an uploadId and objectName to use in subsequent part uploads."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Session created",
-            content = @Content(schema = @Schema(implementation = MultipartInitiateResponseDto.class))),
-        @ApiResponse(responseCode = "400", description = "Failed to initiate",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    // ── Multipart ──────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Initiate multipart upload", description = "Starts a multipart upload session. Returns uploadId and object coordinates.")
     @PostMapping("multipart/initiate")
-    public ResponseEntity<?> initiateMultipart(
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<MultipartInitiateResponseDto>> initiateMultipart(
             @RequestParam String filename,
             @RequestParam(required = false) String fileType,
             @RequestParam(required = false, defaultValue = "application/octet-stream") String contentType,
-            @RequestParam(required = false, defaultValue = "true") Boolean isPublic) {
-        try {
-            String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(fileType);
-            return ResponseEntity.ok(objectStorageService.initiateMultipartUpload(
-                    filename, effectiveFileType, contentType, Boolean.TRUE.equals(isPublic)));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to initiate multipart upload."));
-        }
+            @RequestParam(required = false, defaultValue = "true") Boolean isPublic) throws Exception {
+
+        String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(fileType);
+        MultipartInitiateResponseDto result = objectStorageService.initiateMultipartUpload(
+                filename, effectiveFileType, contentType, Boolean.TRUE.equals(isPublic));
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(result));
     }
 
-    @Operation(
-        summary = "Upload a multipart part",
-        description = "Uploads one part of a multipart upload. Parts must be at least 5 MB except for the last part. " +
-            "Returns the ETag of the part — store it for the complete request."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Part uploaded, returns ETag",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class))),
-        @ApiResponse(responseCode = "400", description = "Part upload failed",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    @Operation(summary = "Upload a part", description = "Uploads one part of an in-progress multipart upload.")
     @PostMapping("multipart/{uploadId}/part/{partNumber}")
-    public ResponseEntity<?> uploadPart(
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<String>> uploadPart(
             @PathVariable String uploadId,
             @PathVariable int partNumber,
             @RequestParam String bucket,
             @RequestParam String objectName,
-            @RequestParam("part") MultipartFile part) {
-        try {
-            String eTag = objectStorageService.uploadPart(bucket, objectName, uploadId,
-                    partNumber, part.getInputStream(), part.getSize());
-            return ResponseEntity.ok(new ResponseBodyDto(eTag));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to upload part."));
-        }
+            @RequestParam("part") MultipartFile part) throws Exception {
+
+        String eTag = objectStorageService.uploadPart(bucket, objectName, uploadId,
+                partNumber, part.getInputStream(), part.getSize());
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(eTag));
     }
 
-    @Operation(
-        summary = "Complete multipart upload",
-        description = "Assembles all uploaded parts into the final object. Parts must be provided in ascending partNumber order."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "File assembled and metadata persisted",
-            content = @Content(schema = @Schema(implementation = FileDocumentDto.class))),
-        @ApiResponse(responseCode = "400", description = "Completion failed",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    @Operation(summary = "Complete multipart upload", description = "Finalises the multipart upload and persists metadata.")
     @PostMapping("multipart/complete")
-    public ResponseEntity<?> completeMultipart(@org.springframework.web.bind.annotation.RequestBody MultipartCompleteRequestDto request) {
-        try {
-            return ResponseEntity.ok(objectStorageService.completeMultipartUpload(request));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to complete multipart upload."));
-        }
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<FileDocumentDto>> completeMultipart(
+            @org.springframework.web.bind.annotation.RequestBody MultipartCompleteRequestDto request) throws Exception {
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
+                objectStorageService.completeMultipartUpload(request)));
     }
 
-    @Operation(
-        summary = "Abort multipart upload",
-        description = "Cancels the multipart upload and releases all uploaded parts from storage."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Upload aborted"),
-        @ApiResponse(responseCode = "400", description = "Abort failed",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    @Operation(summary = "Abort multipart upload", description = "Aborts an in-progress multipart upload and removes uploaded parts.")
     @DeleteMapping("multipart/{uploadId}/abort")
-    public ResponseEntity<?> abortMultipart(
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<String>> abortMultipart(
             @PathVariable String uploadId,
             @RequestParam String bucket,
-            @RequestParam String objectName) {
-        try {
-            objectStorageService.abortMultipartUpload(bucket, objectName, uploadId);
-            return ResponseEntity.ok(new ResponseBodyDto("Multipart upload aborted."));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to abort multipart upload."));
-        }
+            @RequestParam String objectName) throws Exception {
+        objectStorageService.abortMultipartUpload(bucket, objectName, uploadId);
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success("Multipart upload aborted"));
     }
 
-    // Presigned PUT
-    @Operation(
-        summary = "Generate presigned PUT URL",
-        description = "Generates a time-limited URL the client can use to PUT a file directly to storage without routing " +
-            "through this server. After the PUT completes, call /presigned-upload/confirm to persist metadata."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Presigned URL generated",
-            content = @Content(schema = @Schema(implementation = PresignedUploadResponseDto.class))),
-        @ApiResponse(responseCode = "400", description = "URL generation failed",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    // ── Presigned PUT ──────────────────────────────────────────────────────────
+
+    @Operation(summary = "Generate presigned PUT URL", description = "Returns a short-lived URL for direct browser-to-storage upload.")
     @PostMapping("presigned-upload")
-    public ResponseEntity<?> generatePresignedUploadUrl(@org.springframework.web.bind.annotation.RequestBody PresignedUploadRequestDto request) {
-        try {
-            String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(request.getFileType());
-            return ResponseEntity.ok(objectStorageService.generatePresignedUploadUrl(
-                    request.getFilename(), effectiveFileType, request.getContentType(),
-                    Boolean.TRUE.equals(request.getIsPublic())));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to generate presigned upload URL."));
-        }
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<PresignedUploadResponseDto>> generatePresignedUploadUrl(
+            @org.springframework.web.bind.annotation.RequestBody PresignedUploadRequestDto request) throws Exception {
+        String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(request.getFileType());
+        PresignedUploadResponseDto result = objectStorageService.generatePresignedUploadUrl(
+                request.getFilename(), effectiveFileType, request.getContentType(),
+                Boolean.TRUE.equals(request.getIsPublic()));
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(result));
     }
 
-    @Operation(
-        summary = "Confirm presigned upload",
-        description = "Fetches the object metadata from storage and persists a FileDocument to MongoDB. " +
-            "Call this after the client has successfully PUT the file to the presigned URL."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Metadata persisted",
-            content = @Content(schema = @Schema(implementation = FileDocumentDto.class))),
-        @ApiResponse(responseCode = "400", description = "Object not found or metadata persistence failed",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    @Operation(summary = "Confirm presigned upload", description = "After the client has PUT the file via the presigned URL, call this to persist metadata.")
     @PostMapping("presigned-upload/confirm")
-    public ResponseEntity<?> confirmPresignedUpload(@org.springframework.web.bind.annotation.RequestBody PresignedUploadConfirmDto confirm) {
-        try {
-            return ResponseEntity.ok(objectStorageService.confirmPresignedUpload(confirm));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to confirm upload."));
-        }
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<FileDocumentDto>> confirmPresignedUpload(
+            @org.springframework.web.bind.annotation.RequestBody PresignedUploadConfirmDto confirm) throws Exception {
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
+                objectStorageService.confirmPresignedUpload(confirm)));
     }
 
-    // Versioning
-    @Operation(
-        summary = "Download a specific file version",
-        description = "Downloads a specific version of a file identified by its ETag and versionId. " +
-            "Requires versioning to be enabled on the bucket."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "File version downloaded"),
-        @ApiResponse(responseCode = "400", description = "Version not found",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    // ── Versioning ─────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Download a specific version", description = "Downloads a named version of a file identified by ETag.")
     @GetMapping("download/{eTagId}/version")
     public ResponseEntity<?> downloadFileByVersion(
             @PathVariable String eTagId,
-            @Parameter(description = "Version ID as returned by the list-versions endpoint")
-            @RequestParam String versionId) {
-        try {
-            InputStream inputStream = objectStorageService.downloadFileEtagWithVersion(eTagId, versionId);
-            if (inputStream == null) return ResponseEntity.notFound().build();
-            return ResponseEntity.ok()
-                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + eTagId + "\"")
-                    .body(new InputStreamResource(inputStream));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to download file version."));
-        }
+            @RequestParam String versionId) throws Exception {
+        InputStream inputStream = objectStorageService.downloadFileEtagWithVersion(eTagId, versionId);
+        if (inputStream == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + eTagId + "\"")
+                .body(new InputStreamResource(inputStream));
     }
 
-    @Operation(
-        summary = "List file versions",
-        description = "Returns all stored versions of a file in reverse-chronological order. " +
-            "The latest version is marked with isLatest=true."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Version list returned"),
-        @ApiResponse(responseCode = "400", description = "File not found",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    @Operation(summary = "List all versions", description = "Lists all stored versions of a file. Supports pagination.")
     @GetMapping("{eTagId}/versions")
-    public ResponseEntity<?> listVersions(@PathVariable String eTagId) {
-        try {
-            return ResponseEntity.ok(objectStorageService.listFileVersions(eTagId));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to list file versions."));
-        }
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<PagedResult<FileVersionDto>>> listVersions(
+            @PathVariable String eTagId,
+            @Parameter(description = "Zero-based page number") @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Maximum results per page (1-200)") @RequestParam(defaultValue = "50") int size) throws Exception {
+        java.util.List<FileVersionDto> all = objectStorageService.listFileVersions(eTagId);
+        int clampedSize = Math.min(Math.max(size, 1), 200);
+        int from = page * clampedSize;
+        java.util.List<FileVersionDto> pageContent = from >= all.size()
+                ? java.util.Collections.emptyList()
+                : all.subList(from, Math.min(from + clampedSize, all.size()));
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
+                new PagedResult<>(pageContent, page, clampedSize, all.size())));
     }
 
-    // Copy/Move
-    @Operation(
-        summary = "Copy a file",
-        description = "Performs a server-side copy — the binary is duplicated inside storage without re-uploading from the client. " +
-            "The copy lands in the same bucket unless destinationBucket is specified."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "File copied",
-            content = @Content(schema = @Schema(implementation = ObjectCopyResponseDto.class))),
-        @ApiResponse(responseCode = "400", description = "Source not found or copy failed",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    // ── Copy / Move ────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Copy object", description = "Server-side copy of an object, optionally to a different bucket or filename.")
     @PostMapping("copy")
-    public ResponseEntity<?> copyObject(@org.springframework.web.bind.annotation.RequestBody ObjectCopyRequestDto request) {
-        try {
-            return ResponseEntity.ok(objectStorageService.copyObject(request));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to copy file."));
-        }
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<ObjectCopyResponseDto>> copyObject(
+            @org.springframework.web.bind.annotation.RequestBody ObjectCopyRequestDto request) throws Exception {
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
+                objectStorageService.copyObject(request)));
     }
 
-    @Operation(
-        summary = "Move a file",
-        description = "Server-side copy followed by deletion of the source. The source FileDocument is soft-archived in MongoDB."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "File moved",
-            content = @Content(schema = @Schema(implementation = ObjectCopyResponseDto.class))),
-        @ApiResponse(responseCode = "400", description = "Move failed",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    @Operation(summary = "Move object", description = "Server-side move (copy + delete source) of an object.")
     @PostMapping("move")
-    public ResponseEntity<?> moveObject(@org.springframework.web.bind.annotation.RequestBody ObjectCopyRequestDto request) {
-        try {
-            return ResponseEntity.ok(objectStorageService.moveObject(request));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to move file."));
-        }
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<ObjectCopyResponseDto>> moveObject(
+            @org.springframework.web.bind.annotation.RequestBody ObjectCopyRequestDto request) throws Exception {
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
+                objectStorageService.moveObject(request)));
     }
 
-    // Webhooks
-    @Operation(
-        summary = "Register a webhook",
-        description = "Registers an HTTP endpoint to receive notifications when objects are created or removed in a bucket. " +
-            "MinIO uses a live SSE stream; Garage uses scheduled polling (enable via storage.notification.polling.enabled=true)."
-    )
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Webhook registered",
-            content = @Content(schema = @Schema(implementation = WebhookConfigDto.class))),
-        @ApiResponse(responseCode = "400", description = "Registration failed",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    // ── Webhooks ───────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Register webhook", description = "Registers a URL to receive notifications when objects are created or removed.")
     @PostMapping("webhooks")
-    public ResponseEntity<?> registerWebhook(@org.springframework.web.bind.annotation.RequestBody WebhookConfigDto config) {
-        try {
-            return ResponseEntity.ok(notificationService.registerWebhook(config));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to register webhook."));
-        }
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<WebhookConfigDto>> registerWebhook(
+            @org.springframework.web.bind.annotation.RequestBody WebhookConfigDto config) throws Exception {
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
+                notificationService.registerWebhook(config)));
     }
 
-    @Operation(summary = "Deregister a webhook", description = "Marks the webhook as inactive. No further events will be delivered.")
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Webhook deregistered"),
-        @ApiResponse(responseCode = "400", description = "Deregistration failed",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    @Operation(summary = "Deregister webhook", description = "Soft-deactivates a registered webhook by ID.")
     @DeleteMapping("webhooks/{id}")
-    public ResponseEntity<?> deregisterWebhook(@PathVariable String id) {
-        try {
-            notificationService.deregisterWebhook(id);
-            return ResponseEntity.ok(new ResponseBodyDto("Webhook deregistered."));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to deregister webhook."));
-        }
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<String>> deregisterWebhook(@PathVariable String id) throws Exception {
+        notificationService.deregisterWebhook(id);
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success("Webhook deregistered"));
     }
 
-    @Operation(summary = "List webhooks", description = "Returns all active webhook registrations, optionally filtered by bucket.")
-    @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Webhook list returned"),
-        @ApiResponse(responseCode = "400", description = "Query failed",
-            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
-    })
+    @Operation(summary = "List webhooks", description = "Returns registered webhooks, optionally filtered by bucket. Supports pagination.")
     @GetMapping("webhooks")
-    public ResponseEntity<?> listWebhooks(
-            @Parameter(description = "Filter by bucket name — omit to return webhooks for all buckets")
-            @RequestParam(required = false) String bucket) {
-        try {
-            return ResponseEntity.ok(notificationService.listWebhooks(bucket));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResponseBodyDto("Failed to list webhooks."));
-        }
+    public ResponseEntity<com.dave.filestorage.dto.ApiResponse<PagedResult<WebhookConfigDto>>> listWebhooks(
+            @Parameter(description = "Filter by bucket name") @RequestParam(required = false) String bucket,
+            @Parameter(description = "Zero-based page number") @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Maximum results per page (1-100)") @RequestParam(defaultValue = "20") int size) throws Exception {
+        java.util.List<WebhookConfigDto> all = notificationService.listWebhooks(bucket);
+        int clampedSize = Math.min(Math.max(size, 1), 100);
+        int from = page * clampedSize;
+        java.util.List<WebhookConfigDto> pageContent = from >= all.size()
+                ? java.util.Collections.emptyList()
+                : all.subList(from, Math.min(from + clampedSize, all.size()));
+        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
+                new PagedResult<>(pageContent, page, clampedSize, all.size())));
     }
 }

@@ -13,6 +13,7 @@ import com.dave.filestorage.dto.PresignedUploadConfirmDto;
 import com.dave.filestorage.dto.PresignedUploadResponseDto;
 import com.dave.filestorage.dto.RangeDownloadResult;
 import com.dave.filestorage.storage.ObjectStorageService;
+import com.dave.filestorage.config.StorageProperties;
 import com.dave.filestorage.storage.S3NamingSanitizer;
 import io.minio.*;
 import io.minio.errors.*;
@@ -64,14 +65,8 @@ public class MinioStorageServiceImpl implements ObjectStorageService {
     @Autowired
     private FileDocumentRepository fileDocumentRepository;
 
-    @Value("${storage.encryption.sse-s3.enabled:false}")
-    private boolean sseEnabled;
-
-    @Value("${storage.multipart.part-size-bytes:5242880}")
-    private long partSizeBytes;
-
-    @Value("${storage.presigned.put.expiry-minutes:15}")
-    private int presignedPutExpiryMinutes;
+    @Autowired
+    private StorageProperties storageProperties;
 
     @PostConstruct
     public void initBuckets() {
@@ -117,7 +112,7 @@ public class MinioStorageServiceImpl implements ObjectStorageService {
                     .stream(inputStream, file.getSize(), -1)
                     .contentType(file.getContentType());
 
-            if (sseEnabled) {
+            if (storageProperties.getEncryption().getSseS3().isEnabled()) {
                 putArgs.sse(new ServerSideEncryptionS3());
                 doc.setSseAlgorithm("AES256");
             }
@@ -335,6 +330,7 @@ public class MinioStorageServiceImpl implements ObjectStorageService {
             now.getYear(), S3NamingSanitizer.sanitizeOrDefault(fileType), ext,
             S3NamingSanitizer.sanitizeOrDefault(monthName), now.getDayOfMonth(), filename);
 
+        int presignedPutExpiryMinutes = storageProperties.getPresigned().getPut().getExpiryMinutes();
         String uploadUrl = minioClient.getPresignedObjectUrl(
             GetPresignedObjectUrlArgs.builder()
                 .bucket(bucketName).object(objectName)
@@ -367,7 +363,7 @@ public class MinioStorageServiceImpl implements ObjectStorageService {
         doc.setUploadedAt(Date.from(now.toInstant()));
         doc.setPublic(isPublic);
         doc.setArchived(false);
-        if (sseEnabled) doc.setSseAlgorithm("AES256");
+        if (storageProperties.getEncryption().getSseS3().isEnabled()) doc.setSseAlgorithm("AES256");
         fileMetadataWorker.persistMetadataAsync(doc);
 
         return new FileDocumentDto(doc.getEtag(), doc.getEtag(), doc.getOriginalFilename(),

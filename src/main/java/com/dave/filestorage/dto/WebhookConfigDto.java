@@ -9,6 +9,9 @@ import java.util.List;
 @Schema(description = "Webhook configuration for storage event notifications")
 public class WebhookConfigDto {
 
+    @Schema(description = "Webhook registration ID")
+    private String id;
+
     @Schema(description = "Bucket to monitor for events")
     private String bucket;
 
@@ -25,6 +28,14 @@ public class WebhookConfigDto {
         this.bucket = bucket;
         this.webhookUrl = webhookUrl;
         this.events = events;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
     }
 
     public String getBucket() {
