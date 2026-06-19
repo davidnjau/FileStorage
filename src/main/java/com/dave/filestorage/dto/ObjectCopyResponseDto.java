@@ -1,10 +1,23 @@
 package com.dave.filestorage.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
+/**
+ * Result of a server-side copy or move operation.
+ */
+@Schema(description = "Result of a server-side copy or move operation")
 public class ObjectCopyResponseDto {
 
+    @Schema(description = "ETag of the newly created copy")
     private String newEtag;
+
+    @Schema(description = "Full object key of the copy in the storage backend")
     private String newObjectName;
+
+    @Schema(description = "Bucket where the copy was created")
     private String bucket;
+
+    @Schema(description = "Access URL of the copy")
     private String url;
 
     public ObjectCopyResponseDto() {

@@ -1,5 +1,6 @@
 package com.dave.filestorage.db;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -7,38 +8,73 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import java.util.Date;
 import java.util.Map;
 
+/**
+ * MongoDB document storing file metadata alongside the binary stored in S3.
+ */
+@Schema(description = "MongoDB document storing file metadata alongside the binary stored in S3")
 @Document(collection = "file_storage_metadata")
 public class FileDocument {
 
     @Id
     @Indexed
+    @Schema(description = "MongoDB document ID")
     private String id;
 
+    @Schema(description = "Filename as provided by the uploader")
     private String originalFilename;
+
+    @Schema(description = "Full S3 object key including path prefix")
     private String objectName;
+
+    @Schema(description = "S3 bucket name")
     private String bucket;
+
+    @Schema(description = "File size in bytes")
     private long size;
+
+    @Schema(description = "MIME content type")
     private String contentType;
 
     @Indexed
+    @Schema(description = "S3 ETag / content hash")
     private String etag;
+
+    @Schema(description = "Last-modified timestamp from the storage backend")
     private Date lastModified;
+
     private String presignedUrl;
+
+    @Schema(description = "When the file was uploaded to this service")
     private Date uploadedAt;
+
+    @Schema(description = "Expiry time of the presigned URL (private files only)")
     private Date expiryDateTime;
 
-    private boolean archived = false; // Optional: Add a flag for archiving
+    @Schema(description = "Soft-delete flag — archived files are excluded from URL refresh queries")
+    private boolean archived = false;
 
-    // Optional: Add uploader ID or tags for tracking
     private String uploadedBy;
     private Map<String, String> customMetadata;
     private String fileUrl;
+
+    @Schema(description = "Whether the file is publicly accessible without signing")
     private boolean isPublic;
-    private Integer expiryHourTime; // Optional: Add an expiry time for the presigned URL
+
+    @Schema(description = "Presigned URL lifetime in hours")
+    private Integer expiryHourTime;
+
+    @Schema(description = "Multipart upload ID (present during in-progress multipart uploads)")
     private String uploadId;
+
+    @Schema(description = "Multipart upload lifecycle: in_progress | completed | aborted")
     private String uploadStatus;
+
     private Integer totalParts;
+
+    @Schema(description = "S3 version ID (populated when bucket versioning is enabled)")
     private String versionId;
+
+    @Schema(description = "Server-side encryption algorithm, e.g. AES256 (null if not encrypted)")
     private String sseAlgorithm;
 
     // Getters, Setters, Constructors

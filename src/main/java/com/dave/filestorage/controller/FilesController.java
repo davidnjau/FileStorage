@@ -5,8 +5,10 @@ import com.dave.filestorage.storage.NotificationService;
 import com.dave.filestorage.storage.ObjectStorageService;
 import com.dave.filestorage.storage.S3NamingSanitizer;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -32,17 +34,24 @@ public class FilesController {
     @Autowired
     private NotificationService notificationService;
 
-    @Operation(summary = "Upload a File", description = "Uploads a file to the server's file system.")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "${api.response-codes.ok.desc}"),
-            @ApiResponse(responseCode = "400", description = "${api.response-codes.badRequest.desc}",
-                    content = { @Content(examples = { @ExampleObject(value = "") }) }),
-            @ApiResponse(responseCode = "404", description = "${api.response-codes.notFound.desc}",
-                    content = { @Content(examples = { @ExampleObject(value = "") }) }) })
+    @Operation(
+        summary = "Upload a file",
+        description = "Uploads a file to the active S3 backend and persists metadata to MongoDB. " +
+            "Public files return a direct URL; private files return a presigned URL valid for the configured expiry period."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "File uploaded successfully",
+            content = @Content(schema = @Schema(implementation = FileDocumentDto.class))),
+        @ApiResponse(responseCode = "400", description = "Upload failed",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @PostMapping("upload")
     public ResponseEntity<?> uploadFile(
+            @Parameter(description = "File to upload", required = true)
             @RequestParam("file") MultipartFile file,
+            @Parameter(description = "Logical category used as a path prefix in the object key (e.g. invoices, avatars)")
             @RequestParam(value = "fileType", required = false) String fileType,
+            @Parameter(description = "true = direct public URL, false = presigned private URL (default: true)")
             @RequestParam(value = "isPublic", required = false, defaultValue = "true") Boolean isPublic) {
 
         try {
@@ -57,16 +66,22 @@ public class FilesController {
         }
     }
 
-    @Operation(summary = "Download a File", description = "Dowload a file to the server's file system.")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "${api.response-codes.ok.desc}"),
-            @ApiResponse(responseCode = "400", description = "${api.response-codes.badRequest.desc}",
-                    content = { @Content(examples = { @ExampleObject(value = "") }) }),
-            @ApiResponse(responseCode = "404", description = "${api.response-codes.notFound.desc}",
-                    content = { @Content(examples = { @ExampleObject(value = "") }) }) })
+    @Operation(
+        summary = "Download a file",
+        description = "Downloads a file by its ETag. Supports partial content via the standard HTTP Range header " +
+            "(e.g. Range: bytes=0-1023). Returns 206 Partial Content when a range is requested."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Full file content"),
+        @ApiResponse(responseCode = "206", description = "Partial content (byte-range response)"),
+        @ApiResponse(responseCode = "400", description = "File not found or invalid ETag",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @GetMapping("download/{eTagId}")
     public ResponseEntity<?> downloadFileByETag(
+            @Parameter(description = "ETag of the file to download")
             @PathVariable String eTagId,
+            @Parameter(description = "Optional byte range, e.g. bytes=0-1023", example = "bytes=0-1023")
             @RequestHeader(value = HttpHeaders.RANGE, required = false) String rangeHeader) {
 
         try {
@@ -99,6 +114,16 @@ public class FilesController {
         }
     }
 
+    @Operation(
+        summary = "Refresh presigned URL",
+        description = "Regenerates a fresh presigned URL for a private file. Useful when the previous URL has expired."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Fresh URL generated",
+            content = @Content(schema = @Schema(implementation = FileDocumentDto.class))),
+        @ApiResponse(responseCode = "400", description = "File not found",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @GetMapping("refresh/{id}")
     public ResponseEntity<?> getFileUrl(@PathVariable String id) {
         try {
@@ -112,6 +137,16 @@ public class FilesController {
     }
 
     // Multipart
+    @Operation(
+        summary = "Initiate multipart upload",
+        description = "Starts a multipart upload session. Returns an uploadId and objectName to use in subsequent part uploads."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Session created",
+            content = @Content(schema = @Schema(implementation = MultipartInitiateResponseDto.class))),
+        @ApiResponse(responseCode = "400", description = "Failed to initiate",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @PostMapping("multipart/initiate")
     public ResponseEntity<?> initiateMultipart(
             @RequestParam String filename,
@@ -127,6 +162,17 @@ public class FilesController {
         }
     }
 
+    @Operation(
+        summary = "Upload a multipart part",
+        description = "Uploads one part of a multipart upload. Parts must be at least 5 MB except for the last part. " +
+            "Returns the ETag of the part — store it for the complete request."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Part uploaded, returns ETag",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class))),
+        @ApiResponse(responseCode = "400", description = "Part upload failed",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @PostMapping("multipart/{uploadId}/part/{partNumber}")
     public ResponseEntity<?> uploadPart(
             @PathVariable String uploadId,
@@ -143,8 +189,18 @@ public class FilesController {
         }
     }
 
+    @Operation(
+        summary = "Complete multipart upload",
+        description = "Assembles all uploaded parts into the final object. Parts must be provided in ascending partNumber order."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "File assembled and metadata persisted",
+            content = @Content(schema = @Schema(implementation = FileDocumentDto.class))),
+        @ApiResponse(responseCode = "400", description = "Completion failed",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @PostMapping("multipart/complete")
-    public ResponseEntity<?> completeMultipart(@RequestBody MultipartCompleteRequestDto request) {
+    public ResponseEntity<?> completeMultipart(@org.springframework.web.bind.annotation.RequestBody MultipartCompleteRequestDto request) {
         try {
             return ResponseEntity.ok(objectStorageService.completeMultipartUpload(request));
         } catch (Exception e) {
@@ -152,6 +208,15 @@ public class FilesController {
         }
     }
 
+    @Operation(
+        summary = "Abort multipart upload",
+        description = "Cancels the multipart upload and releases all uploaded parts from storage."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Upload aborted"),
+        @ApiResponse(responseCode = "400", description = "Abort failed",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @DeleteMapping("multipart/{uploadId}/abort")
     public ResponseEntity<?> abortMultipart(
             @PathVariable String uploadId,
@@ -166,8 +231,19 @@ public class FilesController {
     }
 
     // Presigned PUT
+    @Operation(
+        summary = "Generate presigned PUT URL",
+        description = "Generates a time-limited URL the client can use to PUT a file directly to storage without routing " +
+            "through this server. After the PUT completes, call /presigned-upload/confirm to persist metadata."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Presigned URL generated",
+            content = @Content(schema = @Schema(implementation = PresignedUploadResponseDto.class))),
+        @ApiResponse(responseCode = "400", description = "URL generation failed",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @PostMapping("presigned-upload")
-    public ResponseEntity<?> generatePresignedUploadUrl(@RequestBody PresignedUploadRequestDto request) {
+    public ResponseEntity<?> generatePresignedUploadUrl(@org.springframework.web.bind.annotation.RequestBody PresignedUploadRequestDto request) {
         try {
             String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(request.getFileType());
             return ResponseEntity.ok(objectStorageService.generatePresignedUploadUrl(
@@ -178,8 +254,19 @@ public class FilesController {
         }
     }
 
+    @Operation(
+        summary = "Confirm presigned upload",
+        description = "Fetches the object metadata from storage and persists a FileDocument to MongoDB. " +
+            "Call this after the client has successfully PUT the file to the presigned URL."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Metadata persisted",
+            content = @Content(schema = @Schema(implementation = FileDocumentDto.class))),
+        @ApiResponse(responseCode = "400", description = "Object not found or metadata persistence failed",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @PostMapping("presigned-upload/confirm")
-    public ResponseEntity<?> confirmPresignedUpload(@RequestBody PresignedUploadConfirmDto confirm) {
+    public ResponseEntity<?> confirmPresignedUpload(@org.springframework.web.bind.annotation.RequestBody PresignedUploadConfirmDto confirm) {
         try {
             return ResponseEntity.ok(objectStorageService.confirmPresignedUpload(confirm));
         } catch (Exception e) {
@@ -188,9 +275,20 @@ public class FilesController {
     }
 
     // Versioning
+    @Operation(
+        summary = "Download a specific file version",
+        description = "Downloads a specific version of a file identified by its ETag and versionId. " +
+            "Requires versioning to be enabled on the bucket."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "File version downloaded"),
+        @ApiResponse(responseCode = "400", description = "Version not found",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @GetMapping("download/{eTagId}/version")
     public ResponseEntity<?> downloadFileByVersion(
             @PathVariable String eTagId,
+            @Parameter(description = "Version ID as returned by the list-versions endpoint")
             @RequestParam String versionId) {
         try {
             InputStream inputStream = objectStorageService.downloadFileEtagWithVersion(eTagId, versionId);
@@ -204,6 +302,16 @@ public class FilesController {
         }
     }
 
+    @Operation(
+        summary = "List file versions",
+        description = "Returns all stored versions of a file in reverse-chronological order. " +
+            "The latest version is marked with isLatest=true."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Version list returned"),
+        @ApiResponse(responseCode = "400", description = "File not found",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @GetMapping("{eTagId}/versions")
     public ResponseEntity<?> listVersions(@PathVariable String eTagId) {
         try {
@@ -214,8 +322,19 @@ public class FilesController {
     }
 
     // Copy/Move
+    @Operation(
+        summary = "Copy a file",
+        description = "Performs a server-side copy — the binary is duplicated inside storage without re-uploading from the client. " +
+            "The copy lands in the same bucket unless destinationBucket is specified."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "File copied",
+            content = @Content(schema = @Schema(implementation = ObjectCopyResponseDto.class))),
+        @ApiResponse(responseCode = "400", description = "Source not found or copy failed",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @PostMapping("copy")
-    public ResponseEntity<?> copyObject(@RequestBody ObjectCopyRequestDto request) {
+    public ResponseEntity<?> copyObject(@org.springframework.web.bind.annotation.RequestBody ObjectCopyRequestDto request) {
         try {
             return ResponseEntity.ok(objectStorageService.copyObject(request));
         } catch (Exception e) {
@@ -223,8 +342,18 @@ public class FilesController {
         }
     }
 
+    @Operation(
+        summary = "Move a file",
+        description = "Server-side copy followed by deletion of the source. The source FileDocument is soft-archived in MongoDB."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "File moved",
+            content = @Content(schema = @Schema(implementation = ObjectCopyResponseDto.class))),
+        @ApiResponse(responseCode = "400", description = "Move failed",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @PostMapping("move")
-    public ResponseEntity<?> moveObject(@RequestBody ObjectCopyRequestDto request) {
+    public ResponseEntity<?> moveObject(@org.springframework.web.bind.annotation.RequestBody ObjectCopyRequestDto request) {
         try {
             return ResponseEntity.ok(objectStorageService.moveObject(request));
         } catch (Exception e) {
@@ -233,8 +362,19 @@ public class FilesController {
     }
 
     // Webhooks
+    @Operation(
+        summary = "Register a webhook",
+        description = "Registers an HTTP endpoint to receive notifications when objects are created or removed in a bucket. " +
+            "MinIO uses a live SSE stream; Garage uses scheduled polling (enable via storage.notification.polling.enabled=true)."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Webhook registered",
+            content = @Content(schema = @Schema(implementation = WebhookConfigDto.class))),
+        @ApiResponse(responseCode = "400", description = "Registration failed",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @PostMapping("webhooks")
-    public ResponseEntity<?> registerWebhook(@RequestBody WebhookConfigDto config) {
+    public ResponseEntity<?> registerWebhook(@org.springframework.web.bind.annotation.RequestBody WebhookConfigDto config) {
         try {
             return ResponseEntity.ok(notificationService.registerWebhook(config));
         } catch (Exception e) {
@@ -242,6 +382,12 @@ public class FilesController {
         }
     }
 
+    @Operation(summary = "Deregister a webhook", description = "Marks the webhook as inactive. No further events will be delivered.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Webhook deregistered"),
+        @ApiResponse(responseCode = "400", description = "Deregistration failed",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @DeleteMapping("webhooks/{id}")
     public ResponseEntity<?> deregisterWebhook(@PathVariable String id) {
         try {
@@ -252,8 +398,16 @@ public class FilesController {
         }
     }
 
+    @Operation(summary = "List webhooks", description = "Returns all active webhook registrations, optionally filtered by bucket.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Webhook list returned"),
+        @ApiResponse(responseCode = "400", description = "Query failed",
+            content = @Content(schema = @Schema(implementation = ResponseBodyDto.class)))
+    })
     @GetMapping("webhooks")
-    public ResponseEntity<?> listWebhooks(@RequestParam(required = false) String bucket) {
+    public ResponseEntity<?> listWebhooks(
+            @Parameter(description = "Filter by bucket name — omit to return webhooks for all buckets")
+            @RequestParam(required = false) String bucket) {
         try {
             return ResponseEntity.ok(notificationService.listWebhooks(bucket));
         } catch (Exception e) {

@@ -1,10 +1,23 @@
 package com.dave.filestorage.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
+/**
+ * Confirm a completed direct upload and persist metadata.
+ */
+@Schema(description = "Confirm a completed direct upload and persist metadata")
 public class PresignedUploadConfirmDto {
 
+    @Schema(description = "Object key from the presigned upload response")
     private String objectName;
+
+    @Schema(description = "Bucket from the presigned upload response")
     private String bucket;
+
+    @Schema(description = "Original filename to store in metadata")
     private String originalFilename;
+
+    @Schema(description = "Visibility used when generating the presigned URL")
     private Boolean isPublic;
 
     public PresignedUploadConfirmDto() {

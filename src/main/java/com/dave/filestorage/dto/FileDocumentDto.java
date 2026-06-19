@@ -1,14 +1,30 @@
 package com.dave.filestorage.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.Date;
 
+/**
+ * File metadata returned after a successful upload or URL refresh.
+ */
+@Schema(description = "File metadata returned after a successful upload or URL refresh")
 public class FileDocumentDto {
 
+    @Schema(description = "Internal document ID")
     private String fileId; //This is the unique identifier for the file document from mongoDB
+
+    @Schema(description = "ETag (content hash) assigned by the storage backend")
     private String eTagId; //This is the ETag of the file in MinIO
+
+    @Schema(description = "Original filename as uploaded by the client")
     private String fileName;
+
+    @Schema(description = "Timestamp of last modification in the storage backend")
     private Date uploadedAt;
+
+    @Schema(description = "File size in bytes")
     private long size;
+
+    @Schema(description = "Access URL — direct for public files, presigned for private files")
     private String url;
 
     public FileDocumentDto() {

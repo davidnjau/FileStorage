@@ -1,9 +1,20 @@
 package com.dave.filestorage.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
+/**
+ * Response from initiating a multipart upload.
+ */
+@Schema(description = "Response from initiating a multipart upload")
 public class MultipartInitiateResponseDto {
 
+    @Schema(description = "Opaque upload ID to reference in subsequent part uploads and completion")
     private String uploadId;
+
+    @Schema(description = "Full object key path that will be used in the storage backend")
     private String objectName;
+
+    @Schema(description = "Target bucket name")
     private String bucket;
 
     public MultipartInitiateResponseDto() {

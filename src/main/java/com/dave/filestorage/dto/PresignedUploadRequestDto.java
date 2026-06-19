@@ -1,10 +1,23 @@
 package com.dave.filestorage.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
+/**
+ * Request a presigned PUT URL for direct browser-to-storage upload.
+ */
+@Schema(description = "Request a presigned PUT URL for direct browser-to-storage upload")
 public class PresignedUploadRequestDto {
 
+    @Schema(description = "Original filename including extension", example = "report.pdf")
     private String filename;
+
+    @Schema(description = "MIME type of the file", example = "application/pdf")
     private String contentType;
+
+    @Schema(description = "Logical category used as a path prefix", example = "invoices")
     private String fileType;
+
+    @Schema(description = "Whether the file should be publicly accessible without signing")
     private Boolean isPublic;
 
     public PresignedUploadRequestDto() {

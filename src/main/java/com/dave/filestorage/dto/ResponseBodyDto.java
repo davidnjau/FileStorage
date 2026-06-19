@@ -1,7 +1,14 @@
 package com.dave.filestorage.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
+/**
+ * Generic message response.
+ */
+@Schema(description = "Generic message response")
 public class ResponseBodyDto {
 
+    @Schema(description = "Human-readable status message")
     private String details;
 
     public ResponseBodyDto() {

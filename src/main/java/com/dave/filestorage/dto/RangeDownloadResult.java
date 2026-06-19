@@ -1,7 +1,13 @@
 package com.dave.filestorage.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.io.InputStream;
 
+/**
+ * Internal result holder for a partial content (byte-range) download.
+ * Not exposed directly in API responses.
+ */
+@Schema(description = "Internal result holder for a partial content (byte-range) download — not exposed directly in responses")
 public class RangeDownloadResult {
 
     private InputStream data;

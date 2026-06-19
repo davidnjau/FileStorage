@@ -1,12 +1,24 @@
 package com.dave.filestorage.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
+/**
+ * Request body to finalise a multipart upload.
+ */
+@Schema(description = "Request body to finalise a multipart upload")
 public class MultipartCompleteRequestDto {
 
+    @Schema(description = "Upload ID from the initiate response")
     private String uploadId;
+
+    @Schema(description = "Object key from the initiate response")
     private String objectName;
+
+    @Schema(description = "Bucket from the initiate response")
     private String bucket;
+
+    @Schema(description = "All completed parts in ascending partNumber order")
     private List<CompletedPartDto> parts;
 
     public MultipartCompleteRequestDto() {
