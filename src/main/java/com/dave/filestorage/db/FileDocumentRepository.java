@@ -26,5 +26,7 @@ public interface FileDocumentRepository extends MongoRepository<FileDocument, St
 
     Optional<FileDocument> findFirstByIdOrEtagAndIsPublicFalseAndArchivedFalse(String id, String etag);
 
+    Optional<FileDocument> findByObjectNameAndVersionId(String objectName, String versionId);
 
+    Optional<FileDocument> findFirstByBucketAndObjectName(String bucket, String objectName);
 }

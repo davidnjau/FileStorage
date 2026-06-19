@@ -1,5 +1,6 @@
 package com.dave.filestorage.minio;
 
+import io.minio.MinioAsyncClient;
 import io.minio.MinioClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -20,12 +21,21 @@ public class MinioConfig {
 
     /**
      * Creates and configures a MinioClient bean.
-     *
-     * @return a MinioClient instance configured with the specified endpoint and credentials.
      */
     @Bean
     public MinioClient minioClient() {
         return MinioClient.builder()
+                .endpoint(minioUrl)
+                .credentials(minioAccessKey, minioSecretKey)
+                .build();
+    }
+
+    /**
+     * Creates a MinioAsyncClient bean used by MinioMultipartHelper.
+     */
+    @Bean
+    public MinioAsyncClient minioAsyncClient() {
+        return MinioAsyncClient.builder()
                 .endpoint(minioUrl)
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
