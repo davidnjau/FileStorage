@@ -45,9 +45,25 @@ services:
     networks:
       - app_network
 
+  garage:
+    image: dxflrs/garage:v1.0.0
+    container_name: garage
+    ports:
+      - "3900:3900"   # S3 API endpoint
+      - "3903:3903"   # Admin API
+    volumes:
+      - garage_data:/var/lib/garage/data
+      - garage_meta:/var/lib/garage/meta
+      - ./garage.toml:/etc/garage.toml
+    restart: unless-stopped
+    networks:
+      - app_network
+
 volumes:
   minio_data:
   mongo_data:
+  garage_data:
+  garage_meta:
 
 networks:
   app_network:

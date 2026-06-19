@@ -5,11 +5,13 @@ import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.SetBucketPolicyArgs;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 
 @Service
+@ConditionalOnProperty(name = "storage.provider", havingValue = "minio", matchIfMissing = true)
 public class MinioBucketService {
 
     @Resource

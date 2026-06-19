@@ -2,7 +2,7 @@ package com.dave.filestorage.controller;
 
 import com.dave.filestorage.dto.FileDocumentDto;
 import com.dave.filestorage.dto.ResponseBodyDto;
-import com.dave.filestorage.storage.MinioStorageService;
+import com.dave.filestorage.storage.ObjectStorageService;
 import com.dave.filestorage.storage.S3NamingSanitizer;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -30,7 +30,7 @@ import java.io.InputStream;
 public class FilesController {
 
     @Autowired
-    private MinioStorageService minioStorageService;
+    private ObjectStorageService objectStorageService;
 
     @Operation(summary = "Upload a File", description = "Uploads a file to the server's file system.")
     @ApiResponses(value = {
@@ -51,7 +51,7 @@ public class FilesController {
 
             String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(fileType);
 
-            FileDocumentDto fileDocumentDto = minioStorageService.uploadFile(file, effectiveFileType, finalIsPublic);
+            FileDocumentDto fileDocumentDto = objectStorageService.uploadFile(file, effectiveFileType, finalIsPublic);
 
             return ResponseEntity.ok(fileDocumentDto);
         } catch (Exception e) {
@@ -75,7 +75,7 @@ public class FilesController {
     public ResponseEntity<?> downloadFileByETag(@PathVariable String eTagId) {
 
         try{
-            InputStream inputStream = minioStorageService.downloadFileEtag(eTagId);
+            InputStream inputStream = objectStorageService.downloadFileEtag(eTagId);
             InputStreamResource resource = new InputStreamResource(inputStream);
             return ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_OCTET_STREAM)
@@ -95,7 +95,7 @@ public class FilesController {
     public ResponseEntity<?> getFileUrl(@PathVariable String id) {
         try {
 
-            FileDocumentDto fileDocumentDto = minioStorageService.getFileDocumentInformation(id);
+            FileDocumentDto fileDocumentDto = objectStorageService.getFileDocumentInformation(id);
 
             return ResponseEntity.ok(fileDocumentDto);
         } catch (Exception e) {

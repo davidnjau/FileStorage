@@ -6,6 +6,7 @@ import com.dave.filestorage.db.FileDocumentService;
 import io.minio.MinioClient;
 import io.minio.SetObjectTagsArgs;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
@@ -13,6 +14,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @Component
+@ConditionalOnProperty(name = "storage.provider", havingValue = "minio", matchIfMissing = true)
 public class FileMetadataWorker {
 
     @Autowired
