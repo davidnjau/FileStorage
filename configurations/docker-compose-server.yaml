@@ -1,0 +1,122 @@
+# ── Standalone server deployment ──────────────────────────────────────
+# No source code needed. Pull this file + .env to any server and run:
+#
+#   MinIO:  docker compose -f docker-compose-server.yaml --profile minio --env-file .env up -d
+#   Garage: docker compose -f docker-compose-server.yaml --profile garage --env-file .env up -d
+#
+# .env template: https://github.com/davidnjau/FileStorage/blob/combined-storage/configurations/.env.example
+
+# ── Shared app config ──────────────────────────────────────────────────
+x-app: &app
+  image: ${APP_IMAGE:-ghcr.io/davidnjau/filestorage:latest}
+  container_name: file-storage-app
+  ports:
+    - "8008:8008"
+  environment:
+    SPRING_DATA_MONGODB_URI: ${MONGO_URI}
+    MINIO_URL: http://minio:9000
+    GARAGE_URL: http://garage:3900
+    STORAGE_PROVIDER: ${STORAGE_PROVIDER}
+  restart: unless-stopped
+  networks:
+    - app_network
+
+services:
+
+  # ── MinIO ──────────────────────────────────────────────────────────────
+  minio:
+    profiles: ["minio"]
+    image: quay.io/minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - app_network
+
+  # ── Garage ────────────────────────────────────────────────────────────
+  garage:
+    profiles: ["garage"]
+    image: dxflrs/garage:v1.0.0
+    container_name: garage
+    ports:
+      - "3900:3900"
+      - "3903:3903"
+    volumes:
+      - garage_data:/var/lib/garage/data
+      - garage_meta:/var/lib/garage/meta
+      - ./garage.toml:/etc/garage.toml
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "garage", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - app_network
+
+  # ── MongoDB ───────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:6
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - app_network
+
+  # ── App — MinIO profile ───────────────────────────────────────────────
+  app-minio:
+    <<: *app
+    profiles: ["minio"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # ── App — Garage profile ──────────────────────────────────────────────
+  app-garage:
+    <<: *app
+    profiles: ["garage"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      garage:
+        condition: service_healthy
+
+volumes:
+  minio_data:
+  garage_data:
+  garage_meta:
+  mongo_data:
+
+networks:
+  app_network:
+    driver: bridge
