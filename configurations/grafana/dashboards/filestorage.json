@@ -1,0 +1,117 @@
+{
+  "title": "FileStorage",
+  "uid": "filestorage",
+  "schemaVersion": 38,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Upload Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(filestorage_uploads_total{status=\"success\"}[1m])",
+          "legendFormat": "success"
+        },
+        {
+          "expr": "rate(filestorage_uploads_total{status=\"failure\"}[1m])",
+          "legendFormat": "failure"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "success" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "failure" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "title": "Download Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(filestorage_downloads_total{status=\"success\"}[1m])",
+          "legendFormat": "success"
+        },
+        {
+          "expr": "rate(filestorage_downloads_total{status=\"not_found\"}[1m])",
+          "legendFormat": "not found"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "success" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "not found" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "title": "Total Uploads",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 8, "w": 6, "h": 4 },
+      "targets": [{ "expr": "filestorage_uploads_total{status=\"success\"}", "legendFormat": "uploads" }],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "fixedColor": "green", "mode": "fixed" } } }
+    },
+    {
+      "id": 4,
+      "title": "Failed Uploads",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 8, "w": 6, "h": 4 },
+      "targets": [{ "expr": "filestorage_uploads_total{status=\"failure\"}", "legendFormat": "failures" }],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "fixedColor": "red", "mode": "fixed" } } }
+    },
+    {
+      "id": 5,
+      "title": "Total Downloads",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 8, "w": 6, "h": 4 },
+      "targets": [{ "expr": "filestorage_downloads_total{status=\"success\"}", "legendFormat": "downloads" }],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "fixedColor": "green", "mode": "fixed" } } }
+    },
+    {
+      "id": 6,
+      "title": "Not Found",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 8, "w": 6, "h": 4 },
+      "targets": [{ "expr": "filestorage_downloads_total{status=\"not_found\"}", "legendFormat": "not found" }],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "fixedColor": "orange", "mode": "fixed" } } }
+    },
+    {
+      "id": 7,
+      "title": "JVM Heap Used",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{area=\"heap\"}",
+          "legendFormat": "heap used"
+        },
+        {
+          "expr": "jvm_memory_max_bytes{area=\"heap\"}",
+          "legendFormat": "heap max"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "lineWidth": 2 } } }
+    },
+    {
+      "id": 8,
+      "title": "HTTP Request Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(http_server_requests_seconds_count[1m])",
+          "legendFormat": "{{method}} {{uri}} {{status}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } } }
+    }
+  ]
+}

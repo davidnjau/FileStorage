@@ -104,11 +104,49 @@ services:
       garage:
         condition: service_healthy
 
+  # ── Prometheus ────────────────────────────────────────────────────────
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    restart: unless-stopped
+    networks:
+      - app_network
+
+  # ── Grafana ───────────────────────────────────────────────────────────
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - app_network
+
 volumes:
   minio_data:
   garage_data:
   garage_meta:
   mongo_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   app_network:

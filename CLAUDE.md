@@ -32,6 +32,9 @@ docker compose -f configurations/docker-compose.yaml --profile minio --env-file 
 # Start all services via Docker Compose (Garage profile)
 docker compose -f configurations/docker-compose.yaml --profile garage --env-file configurations/.env up --build -d
 
+# Start with monitoring (Prometheus + Grafana) — add --profile monitoring to any command
+docker compose -f configurations/docker-compose.yaml --profile minio --profile monitoring --env-file configurations/.env up -d
+
 # View logs
 docker compose -f configurations/docker-compose.yaml --profile minio logs -f
 
@@ -40,11 +43,13 @@ docker compose -f configurations/docker-compose.yaml --profile minio down
 ```
 
 API docs: `http://localhost:8008/swagger-ui.html`  
-Health: `http://localhost:8008/actuator/health`
+Health: `http://localhost:8008/actuator/health`  
+Prometheus: `http://localhost:9090`  
+Grafana: `http://localhost:3000` (admin / value of `GRAFANA_ADMIN_PASSWORD` in `.env`, defaults to `admin`)
 
 ## Architecture
 
-Spring Boot 2.7.3, Java 11, Maven. S3-compatible object storage + MongoDB for metadata.
+Spring Boot 3.2.5, Java 17, Maven. S3-compatible object storage + MongoDB for metadata.
 
 ```
 FilesController → ObjectStorageService (interface)

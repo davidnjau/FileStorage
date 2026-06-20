@@ -1,0 +1,7 @@
+apiVersion: 1
+
+providers:
+  - name: filestorage
+    type: file
+    options:
+      path: /etc/grafana/dashboards
