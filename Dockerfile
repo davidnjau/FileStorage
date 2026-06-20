@@ -12,6 +12,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && addgroup --system filestorage \
     && adduser --system --ingroup filestorage filestorage
+ARG STORAGE_PROVIDER=minio
+ENV STORAGE_PROVIDER=${STORAGE_PROVIDER}
+
 WORKDIR /app
 COPY --from=builder /app/target/FileStorage.jar app.jar
 RUN chown filestorage:filestorage app.jar

@@ -16,6 +16,10 @@ jobs:
       contents: read
       packages: write
 
+    strategy:
+      matrix:
+        provider: [minio, garage]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,27 +31,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=sha-,format=short
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push
+      - name: Build and push (${{ matrix.provider }})
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: STORAGE_PROVIDER=${{ matrix.provider }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.provider }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.provider }}-${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.provider }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.provider }}
 
       - name: Make package public
         run: |

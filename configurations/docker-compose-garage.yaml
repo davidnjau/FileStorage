@@ -1,0 +1,82 @@
+# ── Garage deployment ──────────────────────────────────────────────────
+# Usage:
+#   docker compose -f docker-compose-garage.yaml --env-file .env up -d
+#
+# First-time Garage node setup (run once after containers are up):
+#   NODE=$(docker exec garage garage node id | head -1)
+#   docker exec garage garage layout assign -z dc1 -c 1G $NODE
+#   docker exec garage garage layout apply --version 1
+#   docker exec garage garage key import --key-id $GARAGE_ACCESS_KEY --secret-key $GARAGE_SECRET_KEY my-key
+#   docker exec garage garage bucket allow --read --write --owner ecommerce-public --key my-key
+#   docker exec garage garage bucket allow --read --write --owner ecommerce-private --key my-key
+
+services:
+
+  garage:
+    image: dxflrs/garage:v1.0.0
+    container_name: garage
+    ports:
+      - "3900:3900"
+      - "3903:3903"
+    volumes:
+      - garage_data:/var/lib/garage/data
+      - garage_meta:/var/lib/garage/meta
+      - ./garage.toml:/etc/garage.toml
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "garage", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - app_network
+
+  mongodb:
+    image: mongo:6
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - app_network
+
+  app:
+    image: ${APP_IMAGE:-ghcr.io/davidnjau/filestorage:garage}
+    container_name: file-storage-app
+    ports:
+      - "8008:8008"
+    environment:
+      SPRING_DATA_MONGODB_URI: ${MONGO_URI}
+      GARAGE_URL: http://garage:3900
+      GARAGE_ACCESS_KEY: ${GARAGE_ACCESS_KEY}
+      GARAGE_SECRET_KEY: ${GARAGE_SECRET_KEY}
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      garage:
+        condition: service_healthy
+    networks:
+      - app_network
+
+volumes:
+  garage_data:
+  garage_meta:
+  mongo_data:
+
+networks:
+  app_network:
+    driver: bridge
