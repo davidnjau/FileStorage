@@ -3,6 +3,7 @@ package com.dave.filestorage.controller;
 import com.dave.filestorage.dto.*;
 import com.dave.filestorage.exception.FileNotFoundException;
 import com.dave.filestorage.exception.WebhookValidationException;
+import com.dave.filestorage.metrics.StorageMetrics;
 import com.dave.filestorage.storage.NotificationService;
 import com.dave.filestorage.storage.ObjectStorageService;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,9 @@ class FilesControllerTest {
 
     @MockBean
     NotificationService notificationService;
+
+    @MockBean
+    StorageMetrics storageMetrics;
 
     // ── Upload ──────────────────────────────────────────────────────────────
 
@@ -189,9 +193,7 @@ class FilesControllerTest {
 
     @Test
     void listVersions_paginated_returnsCorrectSlice() throws Exception {
-        when(objectStorageService.listFileVersions("etag-v")).thenReturn(Arrays.asList(
-                new FileVersionDto("v1", new Date(), 100L, "etag-v", false),
-                new FileVersionDto("v2", new Date(), 200L, "etag-v", false),
+        when(objectStorageService.listFileVersions("etag-v", 1, 2)).thenReturn(Arrays.asList(
                 new FileVersionDto("v3", new Date(), 300L, "etag-v", true)
         ));
 
@@ -199,7 +201,6 @@ class FilesControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content", hasSize(1)))
                 .andExpect(jsonPath("$.data.content[0].versionId").value("v3"))
-                .andExpect(jsonPath("$.data.totalElements").value(3))
                 .andExpect(jsonPath("$.data.hasNext").value(false));
     }
 

@@ -62,11 +62,11 @@ public class FilesController {
         String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(fileType);
         try {
             FileDocumentDto result = objectStorageService.uploadFile(file, effectiveFileType, finalIsPublic);
-            storageMetrics.uploadSuccess.increment();
+            storageMetrics.incrementUploadSuccess();
             log.info("File uploaded: {} size={}", result.getFileName(), result.getSize());
             return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(result));
         } catch (Exception ex) {
-            storageMetrics.uploadFailure.increment();
+            storageMetrics.incrementUploadFailure();
             throw ex;
         }
     }
@@ -113,10 +113,10 @@ public class FilesController {
 
         InputStream inputStream = objectStorageService.downloadFileEtag(eTagId);
         if (inputStream == null) {
-            storageMetrics.downloadNotFound.increment();
+            storageMetrics.incrementDownloadNotFound();
             return ResponseEntity.notFound().build();
         }
-        storageMetrics.downloadSuccess.increment();
+        storageMetrics.incrementDownloadSuccess();
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + eTagId + "\"")

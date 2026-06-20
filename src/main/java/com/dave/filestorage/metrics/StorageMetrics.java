@@ -7,10 +7,10 @@ import org.springframework.stereotype.Component;
 @Component
 public class StorageMetrics {
 
-    public final Counter uploadSuccess;
-    public final Counter uploadFailure;
-    public final Counter downloadSuccess;
-    public final Counter downloadNotFound;
+    private final Counter uploadSuccess;
+    private final Counter uploadFailure;
+    private final Counter downloadSuccess;
+    private final Counter downloadNotFound;
 
     public StorageMetrics(MeterRegistry registry) {
         this.uploadSuccess = Counter.builder("filestorage.uploads")
@@ -30,4 +30,9 @@ public class StorageMetrics {
                 .description("Download requests for missing files")
                 .register(registry);
     }
+
+    public void incrementUploadSuccess() { uploadSuccess.increment(); }
+    public void incrementUploadFailure() { uploadFailure.increment(); }
+    public void incrementDownloadSuccess() { downloadSuccess.increment(); }
+    public void incrementDownloadNotFound() { downloadNotFound.increment(); }
 }
