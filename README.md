@@ -26,12 +26,13 @@ A Spring Boot microservice for secure file upload, storage, and metadata trackin
 - Java 11, Spring Boot 2.7.3, Maven
 - **MinIO** via MinIO Java SDK 8.5.2 — or — **Garage** via AWS SDK v2 (`s3:2.20.68`)
 - MongoDB via Spring Data
-- Docker & Docker Compose (with profiles)
+- Docker & Docker Compose
+- GitHub Actions (builds and pushes images to ghcr.io)
 - Testcontainers (integration tests)
 
 ## Quick Setup
 
-Run the interactive setup script — it configures your provider, credentials, and optionally starts docker-compose:
+Run the interactive setup script — it auto-generates credentials, writes `application.properties` and `configurations/.env`, and starts all services via Docker Compose:
 
 ```bash
 chmod +x setup.sh
@@ -40,15 +41,9 @@ chmod +x setup.sh
 
 The script will ask:
 1. Which provider to use (MinIO or Garage)
-2. Credentials and endpoint
-3. MongoDB connection details
-4. Feature flags (versioning, encryption, CORS, lifecycle)
-5. Whether to start docker-compose
-
-Then start the app:
-```bash
-./mvnw spring-boot:run
-```
+2. MongoDB connection details
+3. Feature flags (versioning, encryption, CORS, lifecycle)
+4. Whether to pull and start all services now
 
 ## Manual Configuration
 
@@ -70,8 +65,10 @@ garage.accessKey=your-access-key
 garage.secretKey=your-secret-key
 ```
 
-Set credentials in `configurations/.env`:
+Set credentials in `configurations/.env` (use `.env.example` as a template):
 ```env
+STORAGE_PROVIDER=minio
+
 MINIO_ROOT_USER=
 MINIO_ROOT_PASSWORD=
 
@@ -82,10 +79,6 @@ GARAGE_RPC_SECRET=   # generate with: openssl rand -hex 32
 MONGO_INITDB_ROOT_USERNAME=
 MONGO_INITDB_ROOT_PASSWORD=
 MONGO_INITDB_DATABASE=
-```
-
-Set the MongoDB URI via environment variable (never hardcode credentials):
-```env
 MONGO_URI=mongodb://user:password@localhost:27017/file_storage_db?authSource=admin
 ```
 
@@ -122,7 +115,7 @@ docker compose -f configurations/docker-compose.yaml --profile garage --env-file
 
 ### Server deployment (pulls pre-built image from ghcr.io)
 
-Two provider-specific compose files are provided. No source code or build step needed — just the compose file and a `.env`.
+No source code or build step needed — just the compose file and a `.env`.
 
 ```bash
 # MinIO
@@ -133,9 +126,11 @@ docker compose -f docker-compose-minio.yaml --env-file .env up -d
 
 # Garage
 curl -O https://raw.githubusercontent.com/davidnjau/FileStorage/combined-storage/configurations/docker-compose-garage.yaml
+curl -O https://raw.githubusercontent.com/davidnjau/FileStorage/combined-storage/configurations/garage-init.sh
 curl -O https://raw.githubusercontent.com/davidnjau/FileStorage/combined-storage/configurations/.env.example
 cp .env.example .env && nano .env
 docker compose -f docker-compose-garage.yaml --env-file .env up -d
+chmod +x garage-init.sh && ./garage-init.sh .env
 ```
 
 Images are published to GitHub Container Registry on every push to `combined-storage`:
@@ -150,8 +145,12 @@ Images are published to GitHub Container Registry on every push to `combined-sto
 Run once after the containers are up. The script reads credentials from your `.env`:
 
 ```bash
+# Local (from repo root)
 chmod +x configurations/garage-init.sh
 ./configurations/garage-init.sh configurations/.env
+
+# Server (after curl above)
+chmod +x garage-init.sh && ./garage-init.sh .env
 ```
 
 ## API Endpoints
@@ -251,24 +250,24 @@ All endpoints, request bodies, and response schemas are fully annotated with Ope
 
 ### Unit + controller slice tests (no Docker required)
 ```bash
-./mvnw test -Dtest="S3NamingSanitizerTest,WebhookUrlValidatorTest,ApiResponseTest,PagedResultTest,FilesControllerTest"
+mvn test -Dtest="S3NamingSanitizerTest,WebhookUrlValidatorTest,ApiResponseTest,PagedResultTest,FilesControllerTest"
 ```
 
 ### Repository tests (requires Docker for MongoDB container)
 ```bash
-./mvnw test -Dtest="FileDocumentRepositoryTest,NotificationWebhookConfigRepositoryTest,GaragePollStateRepositoryTest"
+mvn test -Dtest="FileDocumentRepositoryTest,NotificationWebhookConfigRepositoryTest,GaragePollStateRepositoryTest"
 ```
 
 ### Full integration tests (requires Docker for MinIO + MongoDB containers)
 ```bash
-./mvnw test
+mvn test
 ```
 
 Testcontainers pulls and starts MinIO and MongoDB automatically — no manual setup needed.
 
 ### Run a single test
 ```bash
-./mvnw test -Dtest=FilesControllerTest#uploadFile_success_returnsApiResponseEnvelope
+mvn test -Dtest=FilesControllerTest#uploadFile_success_returnsApiResponseEnvelope
 ```
 
 ## Project Structure
@@ -314,6 +313,14 @@ src/test/java/com/dave/filestorage/
 ├── controller/                          # @WebMvcTest slice tests
 ├── db/                                  # @DataMongoTest + MongoDB container
 └── integration/                         # Full stack with MinIO + MongoDB containers
+
+configurations/
+├── docker-compose.yaml                  # Local dev (builds from source, uses profiles)
+├── docker-compose-minio.yaml            # Server deploy — pulls ghcr.io/davidnjau/filestorage:minio
+├── docker-compose-garage.yaml           # Server deploy — pulls ghcr.io/davidnjau/filestorage:garage
+├── garage-init.sh                       # First-time Garage node setup (reads from .env)
+├── .env.example                         # Credentials template
+└── garage.toml                          # Garage configuration
 ```
 
 ## License
