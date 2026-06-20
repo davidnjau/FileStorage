@@ -177,6 +177,9 @@ EOF
 # ── Write .env ────────────────────────────────────────────────────────
 echo -e "${GREEN}Writing $ENV_FILE ...${NC}"
 cat > "$ENV_FILE" <<EOF
+# Provider
+STORAGE_PROVIDER=${PROVIDER}
+
 # MongoDB
 MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
 MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASS}
@@ -215,69 +218,37 @@ else
 fi
 echo -e "${GRAY}These are also saved in $ENV_FILE${NC}\n"
 
-# ── Docker Compose ────────────────────────────────────────────────────
-COMPOSE_STARTED=false
-if yes_no "Start docker-compose now?"; then
-    echo -e "${GREEN}Starting services (profile: $PROVIDER) ...${NC}"
+# ── Build & start everything via Docker Compose ───────────────────────
+echo -e "\n${BOLD}${GREEN}Setup complete.${NC}"
+echo -e "${GRAY}Docker Compose will build the app image and start MongoDB, ${PROVIDER}, and the backend together.${NC}\n"
+
+if yes_no "Build and start all services now?"; then
+    echo -e "${GREEN}Building image and starting services (profile: $PROVIDER) ...${NC}"
     docker compose \
         -f configurations/docker-compose.yaml \
         --profile "$PROVIDER" \
         --env-file "$ENV_FILE" \
-        up -d
-    COMPOSE_STARTED=true
-    echo -e "${GREEN}✓ Containers started${NC}"
+        up --build -d
+
+    echo -e "\n${GREEN}✓ All services started${NC}"
+    echo -e "${GRAY}  The app waits for MongoDB and ${PROVIDER} to be healthy before accepting requests.${NC}"
 
     if [[ "$PROVIDER" == "garage" ]]; then
-        echo -e "\n${YELLOW}Reminder — first-time Garage node setup (run after containers start):${NC}"
+        echo -e "\n${YELLOW}First-time Garage node setup (run once after containers are up):${NC}"
         echo -e "  ${GRAY}docker exec garage garage layout assign -z dc1 -c 1G \$(docker exec garage garage node id | head -1)"
         echo -e "  docker exec garage garage layout apply --version 1"
         echo -e "  docker exec garage garage key import --key-id ${GARAGE_ACCESS} --secret-key ${GARAGE_SECRET} my-key"
         echo -e "  docker exec garage garage bucket allow --read --write --owner ecommerce-public --key my-key"
         echo -e "  docker exec garage garage bucket allow --read --write --owner ecommerce-private --key my-key${NC}"
     fi
-fi
 
-# ── Wait for dependencies ─────────────────────────────────────────────
-wait_for_port() {
-    local host="${1}" port="${2}" label="${3}" retries=30 delay=2
-    echo -e "${CYAN}Waiting for ${label} on ${host}:${port} ...${NC}"
-    for ((i=1; i<=retries; i++)); do
-        if nc -z "$host" "$port" 2>/dev/null; then
-            echo -e "${GREEN}✓ ${label} is ready${NC}"
-            return 0
-        fi
-        echo -e "${GRAY}  attempt $i/$retries — retrying in ${delay}s ...${NC}"
-        sleep "$delay"
-    done
-    echo -e "${YELLOW}⚠ ${label} not reachable after $((retries * delay))s — continuing anyway${NC}"
-    return 1
-}
-
-if [[ "$COMPOSE_STARTED" == true ]]; then
-    MONGO_PORT="${MONGO_HOST##*:}"
-    MONGO_HOST_ONLY="${MONGO_HOST%%:*}"
-    wait_for_port "$MONGO_HOST_ONLY" "${MONGO_PORT:-27017}" "MongoDB"
-
-    if [[ "$PROVIDER" == "minio" ]]; then
-        MINIO_HOST=$(echo "$MINIO_URL" | sed -E 's|https?://([^:/]+).*|\1|')
-        MINIO_PORT=$(echo "$MINIO_URL" | sed -E 's|.*:([0-9]+).*|\1|')
-        wait_for_port "$MINIO_HOST" "${MINIO_PORT:-9000}" "MinIO"
-    else
-        GARAGE_HOST=$(echo "$GARAGE_URL" | sed -E 's|https?://([^:/]+).*|\1|')
-        GARAGE_PORT=$(echo "$GARAGE_URL" | sed -E 's|.*:([0-9]+).*|\1|')
-        wait_for_port "$GARAGE_HOST" "${GARAGE_PORT:-3900}" "Garage"
-    fi
-fi
-
-# ── Start backend ─────────────────────────────────────────────────────
-echo -e "\n${BOLD}${GREEN}Setup complete.${NC}"
-echo -e "API docs:     ${CYAN}http://localhost:8008/swagger-ui.html${NC}"
-echo -e "Health check: ${CYAN}http://localhost:8008/actuator/health${NC}\n"
-
-if yes_no "Start the Spring Boot backend now?"; then
-    echo -e "${GREEN}Building and starting the backend ...${NC}\n"
-    export MONGO_URI="mongodb://${MONGO_USER}:${MONGO_PASS}@${MONGO_HOST}/${MONGO_DB}?authSource=admin"
-    ./mvnw spring-boot:run
+    echo -e "\n${BOLD}Useful commands:${NC}"
+    echo -e "  Logs:         ${CYAN}docker compose -f configurations/docker-compose.yaml --profile ${PROVIDER} logs -f${NC}"
+    echo -e "  Stop:         ${CYAN}docker compose -f configurations/docker-compose.yaml --profile ${PROVIDER} down${NC}"
 else
-    echo -e "When ready, run:  ${CYAN}./mvnw spring-boot:run${NC}\n"
+    echo -e "When ready, run:"
+    echo -e "  ${CYAN}docker compose -f configurations/docker-compose.yaml --profile ${PROVIDER} --env-file ${ENV_FILE} up --build -d${NC}"
 fi
+
+echo -e "\nAPI docs:     ${CYAN}http://localhost:8008/swagger-ui.html${NC}"
+echo -e "Health check: ${CYAN}http://localhost:8008/actuator/health${NC}\n"
