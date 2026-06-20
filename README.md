@@ -110,21 +110,47 @@ All tunable values live in `application.properties` under the `storage.*` prefix
 
 ## Docker Compose
 
-Both providers are in a single compose file with profiles. MongoDB always starts.
+### Local development (builds image from source)
 
 ```bash
 # MinIO + MongoDB
-docker compose -f configurations/docker-compose.yaml --profile minio --env-file configurations/.env up -d
+docker compose -f configurations/docker-compose.yaml --profile minio --env-file configurations/.env up --build -d
 
 # Garage + MongoDB
-docker compose -f configurations/docker-compose.yaml --profile garage --env-file configurations/.env up -d
+docker compose -f configurations/docker-compose.yaml --profile garage --env-file configurations/.env up --build -d
 ```
+
+### Server deployment (pulls pre-built image from ghcr.io)
+
+Two provider-specific compose files are provided. No source code or build step needed — just the compose file and a `.env`.
+
+```bash
+# MinIO
+curl -O https://raw.githubusercontent.com/davidnjau/FileStorage/combined-storage/configurations/docker-compose-minio.yaml
+curl -O https://raw.githubusercontent.com/davidnjau/FileStorage/combined-storage/configurations/.env.example
+cp .env.example .env && nano .env
+docker compose -f docker-compose-minio.yaml --env-file .env up -d
+
+# Garage
+curl -O https://raw.githubusercontent.com/davidnjau/FileStorage/combined-storage/configurations/docker-compose-garage.yaml
+curl -O https://raw.githubusercontent.com/davidnjau/FileStorage/combined-storage/configurations/.env.example
+cp .env.example .env && nano .env
+docker compose -f docker-compose-garage.yaml --env-file .env up -d
+```
+
+Images are published to GitHub Container Registry on every push to `combined-storage`:
+
+| Image | Provider |
+|-------|----------|
+| `ghcr.io/davidnjau/filestorage:minio` | MinIO |
+| `ghcr.io/davidnjau/filestorage:garage` | Garage |
 
 ### First-time Garage node setup
 ```bash
-docker exec garage garage layout assign -z dc1 -c 1G <node-id>
+NODE=$(docker exec garage garage node id | head -1)
+docker exec garage garage layout assign -z dc1 -c 1G $NODE
 docker exec garage garage layout apply --version 1
-docker exec garage garage key create my-key
+docker exec garage garage key import --key-id $GARAGE_ACCESS_KEY --secret-key $GARAGE_SECRET_KEY my-key
 docker exec garage garage bucket allow --read --write --owner ecommerce-public --key my-key
 docker exec garage garage bucket allow --read --write --owner ecommerce-private --key my-key
 ```
