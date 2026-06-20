@@ -8,6 +8,8 @@ x-app: &app
     # Override localhost URLs with Docker service hostnames
     SPRING_DATA_MONGODB_URI: ${MONGO_URI}
     MINIO_URL: http://minio:9000
+    MINIO_ACCESSKEY: ${MINIO_ROOT_USER}
+    MINIO_SECRETKEY: ${MINIO_ROOT_PASSWORD}
     GARAGE_URL: http://garage:3900
     STORAGE_PROVIDER: ${STORAGE_PROVIDER}
   restart: unless-stopped
