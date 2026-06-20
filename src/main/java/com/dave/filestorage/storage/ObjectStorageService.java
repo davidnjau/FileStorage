@@ -136,13 +136,18 @@ public interface ObjectStorageService {
     InputStream downloadFileEtagWithVersion(String etag, String versionId) throws Exception;
 
     /**
-     * Lists all stored versions of a file in reverse-chronological order.
+     * Lists stored versions of a file with server-side pagination.
+     *
+     * <p>Implementations use the backend's native {@code maxKeys} to cap how many versions are
+     * fetched, preventing OOM on files with thousands of versions.
      *
      * @param etag ETag of the file whose versions to list
-     * @return ordered list of {@link FileVersionDto}; the latest version has {@code isLatest=true}
+     * @param page zero-based page number
+     * @param size maximum number of versions to return (1–200)
+     * @return page of {@link FileVersionDto}; the latest version has {@code isLatest=true}
      * @throws Exception if the backend query fails
      */
-    List<FileVersionDto> listFileVersions(String etag) throws Exception;
+    List<FileVersionDto> listFileVersions(String etag, int page, int size) throws Exception;
 
     /**
      * Performs a server-side copy of an existing file without re-uploading from the client.

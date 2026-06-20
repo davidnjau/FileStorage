@@ -1,6 +1,7 @@
 package com.dave.filestorage.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
 
 /**
  * Confirm a completed direct upload and persist metadata.
@@ -8,12 +9,15 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(description = "Confirm a completed direct upload and persist metadata")
 public class PresignedUploadConfirmDto {
 
+    @NotBlank(message = "objectName is required")
     @Schema(description = "Object key from the presigned upload response")
     private String objectName;
 
+    @NotBlank(message = "bucket is required")
     @Schema(description = "Bucket from the presigned upload response")
     private String bucket;
 
+    @NotBlank(message = "originalFilename is required")
     @Schema(description = "Original filename to store in metadata")
     private String originalFilename;
 

@@ -1,6 +1,8 @@
 package com.dave.filestorage.controller;
 
 import com.dave.filestorage.dto.*;
+import com.dave.filestorage.exception.ErrorCode;
+import com.dave.filestorage.metrics.StorageMetrics;
 import com.dave.filestorage.storage.NotificationService;
 import com.dave.filestorage.storage.ObjectStorageService;
 import com.dave.filestorage.storage.S3NamingSanitizer;
@@ -20,6 +22,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -38,6 +41,9 @@ public class FilesController {
     @Autowired
     private NotificationService notificationService;
 
+    @Autowired
+    private StorageMetrics storageMetrics;
+
     @Operation(summary = "Upload a File", description = "Uploads a file to the configured S3-compatible backend.")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "File uploaded successfully",
@@ -54,9 +60,15 @@ public class FilesController {
 
         boolean finalIsPublic = isPublic == null || isPublic;
         String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(fileType);
-        FileDocumentDto result = objectStorageService.uploadFile(file, effectiveFileType, finalIsPublic);
-        log.info("File uploaded: {} size={}", result.getFileName(), result.getSize());
-        return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(result));
+        try {
+            FileDocumentDto result = objectStorageService.uploadFile(file, effectiveFileType, finalIsPublic);
+            storageMetrics.uploadSuccess.increment();
+            log.info("File uploaded: {} size={}", result.getFileName(), result.getSize());
+            return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(result));
+        } catch (Exception ex) {
+            storageMetrics.uploadFailure.increment();
+            throw ex;
+        }
     }
 
     @Operation(summary = "Download a File", description = "Download by ETag. Supports Range header for partial/streaming content.")
@@ -73,7 +85,7 @@ public class FilesController {
         if (rangeHeader != null) {
             if (!rangeHeader.startsWith("bytes=")) {
                 return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
-                        .body(com.dave.filestorage.dto.ApiResponse.error("INVALID_RANGE", "Range header must use bytes= unit"));
+                        .body(com.dave.filestorage.dto.ApiResponse.error(ErrorCode.INVALID_RANGE.name(), "Range header must use bytes= unit"));
             }
             try {
                 String[] rangeParts = rangeHeader.substring(6).split("-");
@@ -82,7 +94,7 @@ public class FilesController {
                         ? Long.parseLong(rangeParts[1].trim()) : -1L;
                 if (start < 0 || (end >= 0 && end < start)) {
                     return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
-                            .body(com.dave.filestorage.dto.ApiResponse.error("INVALID_RANGE", "Invalid byte range: " + rangeHeader));
+                            .body(com.dave.filestorage.dto.ApiResponse.error(ErrorCode.INVALID_RANGE.name(), "Invalid byte range: " + rangeHeader));
                 }
                 RangeDownloadResult result = objectStorageService.downloadFileRange(eTagId, start, end);
                 if (result == null) return ResponseEntity.notFound().build();
@@ -95,12 +107,16 @@ public class FilesController {
                         .body(new InputStreamResource(result.getData()));
             } catch (NumberFormatException ex) {
                 return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
-                        .body(com.dave.filestorage.dto.ApiResponse.error("INVALID_RANGE", "Malformed range header: " + rangeHeader));
+                        .body(com.dave.filestorage.dto.ApiResponse.error(ErrorCode.INVALID_RANGE.name(), "Malformed range header: " + rangeHeader));
             }
         }
 
         InputStream inputStream = objectStorageService.downloadFileEtag(eTagId);
-        if (inputStream == null) return ResponseEntity.notFound().build();
+        if (inputStream == null) {
+            storageMetrics.downloadNotFound.increment();
+            return ResponseEntity.notFound().build();
+        }
+        storageMetrics.downloadSuccess.increment();
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + eTagId + "\"")
@@ -147,7 +163,7 @@ public class FilesController {
     @Operation(summary = "Complete multipart upload", description = "Finalises the multipart upload and persists metadata.")
     @PostMapping("multipart/complete")
     public ResponseEntity<com.dave.filestorage.dto.ApiResponse<FileDocumentDto>> completeMultipart(
-            @org.springframework.web.bind.annotation.RequestBody MultipartCompleteRequestDto request) throws Exception {
+            @org.springframework.web.bind.annotation.RequestBody @Validated MultipartCompleteRequestDto request) throws Exception {
         return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
                 objectStorageService.completeMultipartUpload(request)));
     }
@@ -167,7 +183,7 @@ public class FilesController {
     @Operation(summary = "Generate presigned PUT URL", description = "Returns a short-lived URL for direct browser-to-storage upload.")
     @PostMapping("presigned-upload")
     public ResponseEntity<com.dave.filestorage.dto.ApiResponse<PresignedUploadResponseDto>> generatePresignedUploadUrl(
-            @org.springframework.web.bind.annotation.RequestBody PresignedUploadRequestDto request) throws Exception {
+            @org.springframework.web.bind.annotation.RequestBody @Validated PresignedUploadRequestDto request) throws Exception {
         String effectiveFileType = S3NamingSanitizer.sanitizeOrDefault(request.getFileType());
         PresignedUploadResponseDto result = objectStorageService.generatePresignedUploadUrl(
                 request.getFilename(), effectiveFileType, request.getContentType(),
@@ -178,7 +194,7 @@ public class FilesController {
     @Operation(summary = "Confirm presigned upload", description = "After the client has PUT the file via the presigned URL, call this to persist metadata.")
     @PostMapping("presigned-upload/confirm")
     public ResponseEntity<com.dave.filestorage.dto.ApiResponse<FileDocumentDto>> confirmPresignedUpload(
-            @org.springframework.web.bind.annotation.RequestBody PresignedUploadConfirmDto confirm) throws Exception {
+            @org.springframework.web.bind.annotation.RequestBody @Validated PresignedUploadConfirmDto confirm) throws Exception {
         return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
                 objectStorageService.confirmPresignedUpload(confirm)));
     }
@@ -204,14 +220,10 @@ public class FilesController {
             @PathVariable String eTagId,
             @Parameter(description = "Zero-based page number") @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "Maximum results per page (1-200)") @RequestParam(defaultValue = "50") int size) throws Exception {
-        java.util.List<FileVersionDto> all = objectStorageService.listFileVersions(eTagId);
         int clampedSize = Math.min(Math.max(size, 1), 200);
-        int from = page * clampedSize;
-        java.util.List<FileVersionDto> pageContent = from >= all.size()
-                ? java.util.Collections.emptyList()
-                : all.subList(from, Math.min(from + clampedSize, all.size()));
+        java.util.List<FileVersionDto> pageContent = objectStorageService.listFileVersions(eTagId, page, clampedSize);
         return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
-                new PagedResult<>(pageContent, page, clampedSize, all.size())));
+                new PagedResult<>(pageContent, page, clampedSize, pageContent.size())));
     }
 
     // ── Copy / Move ────────────────────────────────────────────────────────────
@@ -219,7 +231,7 @@ public class FilesController {
     @Operation(summary = "Copy object", description = "Server-side copy of an object, optionally to a different bucket or filename.")
     @PostMapping("copy")
     public ResponseEntity<com.dave.filestorage.dto.ApiResponse<ObjectCopyResponseDto>> copyObject(
-            @org.springframework.web.bind.annotation.RequestBody ObjectCopyRequestDto request) throws Exception {
+            @org.springframework.web.bind.annotation.RequestBody @Validated ObjectCopyRequestDto request) throws Exception {
         return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
                 objectStorageService.copyObject(request)));
     }
@@ -227,7 +239,7 @@ public class FilesController {
     @Operation(summary = "Move object", description = "Server-side move (copy + delete source) of an object.")
     @PostMapping("move")
     public ResponseEntity<com.dave.filestorage.dto.ApiResponse<ObjectCopyResponseDto>> moveObject(
-            @org.springframework.web.bind.annotation.RequestBody ObjectCopyRequestDto request) throws Exception {
+            @org.springframework.web.bind.annotation.RequestBody @Validated ObjectCopyRequestDto request) throws Exception {
         return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
                 objectStorageService.moveObject(request)));
     }
@@ -237,7 +249,7 @@ public class FilesController {
     @Operation(summary = "Register webhook", description = "Registers a URL to receive notifications when objects are created or removed.")
     @PostMapping("webhooks")
     public ResponseEntity<com.dave.filestorage.dto.ApiResponse<WebhookConfigDto>> registerWebhook(
-            @org.springframework.web.bind.annotation.RequestBody WebhookConfigDto config) throws Exception {
+            @org.springframework.web.bind.annotation.RequestBody @Validated WebhookConfigDto config) throws Exception {
         return ResponseEntity.ok(com.dave.filestorage.dto.ApiResponse.success(
                 notificationService.registerWebhook(config)));
     }

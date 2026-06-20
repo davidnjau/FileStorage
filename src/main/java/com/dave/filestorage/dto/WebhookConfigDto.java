@@ -1,6 +1,8 @@
 package com.dave.filestorage.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import java.util.List;
 
 /**
@@ -12,12 +14,15 @@ public class WebhookConfigDto {
     @Schema(description = "Webhook registration ID")
     private String id;
 
+    @NotBlank(message = "bucket is required")
     @Schema(description = "Bucket to monitor for events")
     private String bucket;
 
+    @NotBlank(message = "webhookUrl is required")
     @Schema(description = "HTTP endpoint that will receive POST requests on matching events")
     private String webhookUrl;
 
+    @NotEmpty(message = "events must not be empty")
     @Schema(description = "S3 event names to subscribe to", example = "[\"s3:ObjectCreated:*\", \"s3:ObjectRemoved:*\"]")
     private List<String> events;
 

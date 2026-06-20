@@ -27,7 +27,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.InvalidKeyException;
@@ -401,25 +401,30 @@ public class MinioStorageServiceImpl implements ObjectStorageService {
     }
 
     @Override
-    public List<FileVersionDto> listFileVersions(String etag) throws Exception {
+    public List<FileVersionDto> listFileVersions(String etag, int page, int size) throws Exception {
         FileDocument doc = fileDocumentService.findByEtag(etag);
         if (doc == null) return Collections.emptyList();
 
-        List<FileVersionDto> result = new ArrayList<>();
+        int fetchLimit = (page + 1) * size;
+        List<FileVersionDto> fetched = new ArrayList<>();
         Iterable<Result<Item>> versions = minioClient.listObjects(
             ListObjectsArgs.builder()
                 .bucket(doc.getBucket()).prefix(doc.getObjectName())
-                .includeVersions(true).build());
+                .includeVersions(true)
+                .maxKeys(fetchLimit)
+                .build());
         for (Result<Item> r : versions) {
             Item item = r.get();
-            result.add(new FileVersionDto(
+            fetched.add(new FileVersionDto(
                 item.versionId(),
                 Date.from(item.lastModified().toInstant()),
                 item.size(),
                 item.etag(),
                 item.isLatest()));
         }
-        return result;
+        int from = page * size;
+        if (from >= fetched.size()) return Collections.emptyList();
+        return fetched.subList(from, Math.min(from + size, fetched.size()));
     }
 
     @Override

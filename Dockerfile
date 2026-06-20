@@ -1,12 +1,12 @@
 # Stage 1: build
-FROM maven:3-eclipse-temurin-11 AS builder
+FROM maven:3-eclipse-temurin-17 AS builder
 WORKDIR /app
 COPY pom.xml .
 COPY src ./src
 RUN mvn clean package -DskipTests -q
 
 # Stage 2: run
-FROM eclipse-temurin:11-jre
+FROM eclipse-temurin:17-jre
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \

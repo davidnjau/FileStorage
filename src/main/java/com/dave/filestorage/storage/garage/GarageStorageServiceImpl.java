@@ -22,7 +22,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequ
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.io.InputStream;
 import java.time.Duration;
 import java.time.ZonedDateTime;
@@ -369,15 +369,18 @@ public class GarageStorageServiceImpl implements ObjectStorageService {
     }
 
     @Override
-    public List<FileVersionDto> listFileVersions(String etag) throws Exception {
+    public List<FileVersionDto> listFileVersions(String etag, int page, int size) throws Exception {
         FileDocument doc = fileDocumentService.findByEtag(etag);
         if (doc == null) return Collections.emptyList();
 
+        int fetchLimit = (page + 1) * size;
         ListObjectVersionsResponse resp = garageS3Client.listObjectVersions(
                 ListObjectVersionsRequest.builder()
-                        .bucket(doc.getBucket()).prefix(doc.getObjectName()).build());
+                        .bucket(doc.getBucket()).prefix(doc.getObjectName())
+                        .maxKeys(fetchLimit)
+                        .build());
 
-        return resp.versions().stream()
+        List<FileVersionDto> fetched = resp.versions().stream()
                 .map(v -> new FileVersionDto(
                         v.versionId(),
                         Date.from(v.lastModified()),
@@ -385,6 +388,10 @@ public class GarageStorageServiceImpl implements ObjectStorageService {
                         v.eTag().replace("\"", ""),
                         v.isLatest()))
                 .collect(Collectors.toList());
+
+        int from = page * size;
+        if (from >= fetched.size()) return Collections.emptyList();
+        return fetched.subList(from, Math.min(from + size, fetched.size()));
     }
 
     @Override

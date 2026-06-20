@@ -19,7 +19,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -92,7 +92,7 @@ public class MinioNotificationServiceImpl implements NotificationService {
             .forEach(this::listenBucket);
     }
 
-    @javax.annotation.PreDestroy
+    @jakarta.annotation.PreDestroy
     public void stopListeners() {
         log.info("Stopping {} MinIO notification listeners", activeListeners.size());
         activeListeners.forEach((bucket, iterator) -> {

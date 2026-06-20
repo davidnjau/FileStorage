@@ -1,6 +1,8 @@
 package com.dave.filestorage.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import java.util.List;
 
 /**
@@ -9,15 +11,19 @@ import java.util.List;
 @Schema(description = "Request body to finalise a multipart upload")
 public class MultipartCompleteRequestDto {
 
+    @NotBlank(message = "uploadId is required")
     @Schema(description = "Upload ID from the initiate response")
     private String uploadId;
 
+    @NotBlank(message = "objectName is required")
     @Schema(description = "Object key from the initiate response")
     private String objectName;
 
+    @NotBlank(message = "bucket is required")
     @Schema(description = "Bucket from the initiate response")
     private String bucket;
 
+    @NotEmpty(message = "parts must not be empty")
     @Schema(description = "All completed parts in ascending partNumber order")
     private List<CompletedPartDto> parts;
 

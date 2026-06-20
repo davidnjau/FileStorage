@@ -1,6 +1,7 @@
 package com.dave.filestorage.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
 
 /**
  * Request a server-side copy or move of an existing file.
@@ -8,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(description = "Request a server-side copy or move of an existing file")
 public class ObjectCopyRequestDto {
 
+    @NotBlank(message = "sourceEtag is required")
     @Schema(description = "ETag of the source file to copy")
     private String sourceEtag;
 

@@ -1,6 +1,7 @@
 package com.dave.filestorage.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
 
 /**
  * Request a presigned PUT URL for direct browser-to-storage upload.
@@ -8,9 +9,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(description = "Request a presigned PUT URL for direct browser-to-storage upload")
 public class PresignedUploadRequestDto {
 
+    @NotBlank(message = "filename is required")
     @Schema(description = "Original filename including extension", example = "report.pdf")
     private String filename;
 
+    @NotBlank(message = "contentType is required")
     @Schema(description = "MIME type of the file", example = "application/pdf")
     private String contentType;
 
