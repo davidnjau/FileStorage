@@ -100,7 +100,7 @@ public class GarageStorageServiceImpl implements ObjectStorageService {
             PutObjectRequest.Builder putReqBuilder = PutObjectRequest.builder()
                     .bucket(bucketName)
                     .key(objectName)
-                    .contentType(file.getContentType());
+                    .contentType(file.getContentType() != null ? file.getContentType() : "application/octet-stream");
             if (storageProperties.getEncryption().getSseS3().isEnabled()) {
                 putReqBuilder.serverSideEncryption(ServerSideEncryption.AES256);
             }

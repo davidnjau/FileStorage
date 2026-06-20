@@ -110,7 +110,7 @@ public class MinioStorageServiceImpl implements ObjectStorageService {
                     .bucket(bucketName)
                     .object(objectName)
                     .stream(inputStream, file.getSize(), -1)
-                    .contentType(file.getContentType());
+                    .contentType(file.getContentType() != null ? file.getContentType() : "application/octet-stream");
 
             if (storageProperties.getEncryption().getSseS3().isEnabled()) {
                 putArgs.sse(new ServerSideEncryptionS3());
