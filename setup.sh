@@ -222,13 +222,18 @@ echo -e "${GRAY}These are also saved in $ENV_FILE${NC}\n"
 echo -e "\n${BOLD}${GREEN}Setup complete.${NC}"
 echo -e "${GRAY}Docker Compose will build the app image and start MongoDB, ${PROVIDER}, and the backend together.${NC}\n"
 
-if yes_no "Build and start all services now?"; then
-    echo -e "${GREEN}Building image and starting services (profile: $PROVIDER) ...${NC}"
+if yes_no "Pull and start all services now?"; then
+    echo -e "${GREEN}Pulling image and starting services (profile: $PROVIDER) ...${NC}"
     docker compose \
         -f configurations/docker-compose.yaml \
         --profile "$PROVIDER" \
         --env-file "$ENV_FILE" \
-        up --build -d
+        pull
+    docker compose \
+        -f configurations/docker-compose.yaml \
+        --profile "$PROVIDER" \
+        --env-file "$ENV_FILE" \
+        up -d
 
     echo -e "\n${GREEN}✓ All services started${NC}"
     echo -e "${GRAY}  The app waits for MongoDB and ${PROVIDER} to be healthy before accepting requests.${NC}"
@@ -247,7 +252,7 @@ if yes_no "Build and start all services now?"; then
     echo -e "  Stop:         ${CYAN}docker compose -f configurations/docker-compose.yaml --profile ${PROVIDER} down${NC}"
 else
     echo -e "When ready, run:"
-    echo -e "  ${CYAN}docker compose -f configurations/docker-compose.yaml --profile ${PROVIDER} --env-file ${ENV_FILE} up --build -d${NC}"
+    echo -e "  ${CYAN}docker compose -f configurations/docker-compose.yaml --profile ${PROVIDER} --env-file ${ENV_FILE} up -d${NC}"
 fi
 
 echo -e "\nAPI docs:     ${CYAN}http://localhost:8008/swagger-ui.html${NC}"

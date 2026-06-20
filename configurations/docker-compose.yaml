@@ -1,8 +1,6 @@
 # ── Shared app config (merged into app-minio and app-garage) ──────────
 x-app: &app
-  build:
-    context: ..
-    dockerfile: Dockerfile
+  image: ${APP_IMAGE:-ghcr.io/davidnjau/filestorage:latest}
   container_name: file-storage-app
   ports:
     - "8008:8008"
