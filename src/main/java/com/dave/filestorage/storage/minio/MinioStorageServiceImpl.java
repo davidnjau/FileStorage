@@ -59,6 +59,9 @@ public class MinioStorageServiceImpl implements ObjectStorageService {
     @Value("${minio.url}")
     private String minioUrl;
 
+    @Value("${minio.publicUrl:${minio.url}}")
+    private String minioPublicUrl;
+
     @Value("${minio.expiry.hours}")
     private String expiryHours;
 
@@ -178,7 +181,7 @@ public class MinioStorageServiceImpl implements ObjectStorageService {
             InvalidResponseException, XmlParserException, InternalException {
         String url;
         if (isPublic) {
-            url = buildPublicUrl(minioUrl, bucketName, objectName);
+            url = buildPublicUrl(minioPublicUrl, bucketName, objectName);
         } else {
             url = minioClient.getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
