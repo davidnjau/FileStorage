@@ -1,5 +1,3 @@
-version: '3.8'
-
 # ── Shared app config (merged into app-minio and app-garage) ──────────
 x-app: &app
   build:
