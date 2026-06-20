@@ -5,49 +5,88 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Run locally
+# Interactive setup (generates credentials, writes configs, optionally starts Docker)
+./setup.sh
+
+# Run locally (requires application.properties already configured)
 mvn spring-boot:run
 
 # Build JAR
-mvn clean package
+mvn clean package -DskipTests
 
-# Run tests
+# Run all tests (requires Docker — Testcontainers pulls MinIO + MongoDB)
 mvn test
 
-# Run a single test class
-mvn test -Dtest=FileStorageApplicationTests
+# Run only unit + controller slice tests (no Docker)
+mvn test -Dtest="S3NamingSanitizerTest,WebhookUrlValidatorTest,ApiResponseTest,PagedResultTest,FilesControllerTest"
 
-# Start PostgreSQL via Docker
-docker run --name myPostgresDb -p 5455:5432 \
-  -e POSTGRES_USER=postgresUser \
-  -e POSTGRES_PASSWORD=postgresPW \
-  -e POSTGRES_DB=files -d postgres
+# Run only repository tests (requires Docker for MongoDB)
+mvn test -Dtest="FileDocumentRepositoryTest,NotificationWebhookConfigRepositoryTest,GaragePollStateRepositoryTest"
 
-# Build and run Docker image
-docker build -t file-storage .
-docker run -p 8081:8081 file-storage
+# Run a single test
+mvn test -Dtest=FilesControllerTest#uploadFile_success_returnsApiResponseEnvelope
+
+# Start all services via Docker Compose (MinIO profile)
+docker compose -f configurations/docker-compose.yaml --profile minio --env-file configurations/.env up --build -d
+
+# Start all services via Docker Compose (Garage profile)
+docker compose -f configurations/docker-compose.yaml --profile garage --env-file configurations/.env up --build -d
+
+# View logs
+docker compose -f configurations/docker-compose.yaml --profile minio logs -f
+
+# Stop all services
+docker compose -f configurations/docker-compose.yaml --profile minio down
 ```
 
-API docs available at `http://localhost:8081/swagger-ui.html` once running.
+API docs: `http://localhost:8008/swagger-ui.html`  
+Health: `http://localhost:8008/actuator/health`
 
 ## Architecture
 
-Spring Boot REST API (Java 11, Maven) with a standard layered structure:
+Spring Boot 2.7.3, Java 11, Maven. S3-compatible object storage + MongoDB for metadata.
 
 ```
-FilesController  →  FileStorageService  →  FileRepo (JPA)  →  PostgreSQL
+FilesController → ObjectStorageService (interface)
+                      ├── MinioStorageServiceImpl   (storage.provider=minio)
+                      └── GarageStorageServiceImpl  (storage.provider=garage)
+
+FilesController → FileDocumentService → FileDocumentRepository → MongoDB
 ```
 
-Files are stored as BLOBs in the database — there is no filesystem storage despite the `file.upload-dir` property in `application.properties` (that property is currently unused by the service).
+Provider switching is compile-time safe via `@ConditionalOnProperty(name="storage.provider")`. MinIO has `matchIfMissing=true` as the default. No code changes needed to swap providers — only `storage.provider` in `application.properties` (or the `STORAGE_PROVIDER` env var in Docker).
 
-**Key flows:**
-- `POST /upload-file` — multipart upload; service validates against path traversal, stores binary content + metadata (`id`, `name`, `type`) as a `Files` entity, returns a `FileUploadResponse` with the download URI.
-- `GET /download-file/{fileId}` — looks up by UUID, streams bytes back with correct `Content-Type`.
+**Key packages:**
+- `config/` — `StorageProperties` (`@ConfigurationProperties(prefix="storage")`) is the single source of truth for all tunables (multipart thresholds, lifecycle expiry, presigned URL TTL, etc.)
+- `controller/` — All endpoints return `ApiResponse<T>`; no per-method try/catch (handled by `GlobalExceptionHandler`)
+- `db/` — `FileDocument` (MongoDB), `GaragePollState` (change-detection state for Garage polling)
+- `dto/` — `ApiResponse<T>` (standard envelope), `PagedResult<T>` (paginated responses)
+- `exception/` — `FileStorageException` → `FileNotFoundException`, `MultipartUploadException`, `WebhookValidationException`; all mapped in `GlobalExceptionHandler`
+- `health/` — `MinioHealthIndicator`, `GarageHealthIndicator` (Spring Boot Actuator)
+- `storage/minio/` — MinIO SDK implementation + SSE listener with `@PreDestroy` shutdown
+- `storage/garage/` — AWS SDK v2 implementation + `@Scheduled` polling for change detection
+- `util/` — `WebhookUrlValidator` (SSRF protection: rejects private IPs, loopback, non-HTTP(S))
 
-**Exception handling:** `FileStorageException` (500) and `FileNotFoundException` (404) are the two custom exceptions. They are thrown from the service layer and should bubble up to Spring's default error handling.
+**All API responses follow this envelope:**
+```json
+{ "status": "success|error", "data": {}, "error": { "code": "", "message": "" }, "timestamp": 0 }
+```
 
 ## Configuration
 
-`src/main/resources/application.properties` — the database URL points to `0.0.0.0:5455` (the Docker-mapped port). Credentials match the `docker run` command above. DDL is set to `update`, so Hibernate manages schema migrations automatically.
+`application.properties` uses `${MONGO_URI:mongodb://localhost:27017/file_storage_db}` — the env var is overridden in Docker Compose to use the `mongodb` container hostname. The file baked into the JAR serves as localhost fallback for local development.
 
-Max upload size: 100 MB per file / 125 MB per request.
+`configurations/.env` is **not committed** — it is generated by `setup.sh`. It contains `STORAGE_PROVIDER`, MongoDB credentials, and MinIO/Garage keys.
+
+Docker Compose uses profiles (`minio`, `garage`). MongoDB always starts. The app service (`app-minio` / `app-garage`) waits for both MongoDB and the storage backend to pass healthchecks before starting.
+
+**First-time Garage setup** requires manual one-time node layout assignment — see README.
+
+## Testing
+
+- `unit/` — pure unit tests, no containers
+- `controller/` — `@WebMvcTest` slice tests (no containers)
+- `db/` — `@DataMongoTest` + Testcontainers MongoDB
+- `integration/` — full stack with Testcontainers (MinIO + MongoDB)
+
+`FileStorageApplicationTests` is the context load test and requires both containers.
