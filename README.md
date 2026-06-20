@@ -146,13 +146,12 @@ Images are published to GitHub Container Registry on every push to `combined-sto
 | `ghcr.io/davidnjau/filestorage:garage` | Garage |
 
 ### First-time Garage node setup
+
+Run once after the containers are up. The script reads credentials from your `.env`:
+
 ```bash
-NODE=$(docker exec garage garage node id | head -1)
-docker exec garage garage layout assign -z dc1 -c 1G $NODE
-docker exec garage garage layout apply --version 1
-docker exec garage garage key import --key-id $GARAGE_ACCESS_KEY --secret-key $GARAGE_SECRET_KEY my-key
-docker exec garage garage bucket allow --read --write --owner ecommerce-public --key my-key
-docker exec garage garage bucket allow --read --write --owner ecommerce-private --key my-key
+chmod +x configurations/garage-init.sh
+./configurations/garage-init.sh configurations/.env
 ```
 
 ## API Endpoints
